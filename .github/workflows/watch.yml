@@ -1,4 +1,4 @@
-name: Watch Google Internships
+name: Watch Internships
 
 on:
   schedule:
@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: watch-google-internships
+  group: watch-internships
   cancel-in-progress: false
 
 jobs:
