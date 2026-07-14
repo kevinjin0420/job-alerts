@@ -26,7 +26,7 @@ def send_ntfy_notification(topic: str, listing: Listing) -> None:
         pass
 
 
-def send_email_notification(smtp_user: str, smtp_pass: str, email_to: str, listing: Listing) -> None:
+def send_email_notification(smtp_user: str, smtp_pass: str, email_to: list[str], listing: Listing) -> None:
     body = (
         f"Company: {listing.company_name}\n"
         f"Role: {listing.title}\n"
@@ -36,12 +36,12 @@ def send_email_notification(smtp_user: str, smtp_pass: str, email_to: str, listi
     message = MIMEText(body)
     message["Subject"] = f"New {listing.company_name} internship: {listing.title}"
     message["From"] = smtp_user
-    message["To"] = email_to
+    message["To"] = ", ".join(email_to)
     with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=REQUEST_TIMEOUT_SECONDS) as server:
         server.login(smtp_user, smtp_pass)
-        server.sendmail(smtp_user, [email_to], message.as_string())
+        server.sendmail(smtp_user, email_to, message.as_string())
 
 
-def notify(ntfy_topic: str, smtp_user: str, smtp_pass: str, email_to: str, listing: Listing) -> None:
+def notify(ntfy_topic: str, smtp_user: str, smtp_pass: str, email_to: list[str], listing: Listing) -> None:
     send_ntfy_notification(ntfy_topic, listing)
     send_email_notification(smtp_user, smtp_pass, email_to, listing)

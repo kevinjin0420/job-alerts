@@ -17,6 +17,11 @@ def get_target_companies() -> list[str]:
     return [name.strip() for name in raw.split(",") if name.strip()]
 
 
+def get_email_recipients() -> list[str]:
+    raw = os.environ.get("EMAIL_TO") or ""
+    return [address.strip() for address in raw.split(",") if address.strip()]
+
+
 def get_enabled_source_specs() -> list[str]:
     raw = os.environ.get("ENABLED_SOURCES") or DEFAULT_ENABLED_SOURCES
     return [spec.strip() for spec in raw.split(",") if spec.strip()]
@@ -37,10 +42,10 @@ def fetch_all_listings(sources: list[Source]) -> list[Listing]:
 
 def main() -> int:
     ntfy_topic = os.environ.get("NTFY_TOPIC")
-    email_to = os.environ.get("EMAIL_TO")
+    email_recipients = get_email_recipients()
     smtp_user = os.environ.get("SMTP_USER")
     smtp_pass = os.environ.get("SMTP_PASS")
-    if not ntfy_topic or not email_to or not smtp_user or not smtp_pass:
+    if not ntfy_topic or not email_recipients or not smtp_user or not smtp_pass:
         print(
             "Missing required environment variables: NTFY_TOPIC, EMAIL_TO, SMTP_USER, SMTP_PASS",
             file=sys.stderr,
@@ -69,7 +74,7 @@ def main() -> int:
 
     for listing in new_listings:
         try:
-            notify(ntfy_topic, smtp_user, smtp_pass, email_to, listing)
+            notify(ntfy_topic, smtp_user, smtp_pass, email_recipients, listing)
         except NotificationError as error:
             had_notification_failure = True
             print(

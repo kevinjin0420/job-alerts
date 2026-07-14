@@ -69,7 +69,7 @@ ntfy is a pub/sub push service. A "topic" is just a path segment on `ntfy.sh` - 
 ## Setup
 
 1. **Create the repo secrets and variables.** In this repo's Settings -> Secrets and variables -> Actions:
-   - Secrets: `NTFY_TOPIC` (a random, hard-to-guess string), `EMAIL_TO`, `SMTP_USER` (your Gmail address), `SMTP_PASS` (a [Gmail App Password](https://myaccount.google.com/apppasswords) - requires 2FA on the account).
+   - Secrets: `NTFY_TOPIC` (a random, hard-to-guess string), `EMAIL_TO` (comma-separated for multiple recipients), `SMTP_USER` (your Gmail address), `SMTP_PASS` (a [Gmail App Password](https://myaccount.google.com/apppasswords) - requires 2FA on the account).
    - Variables (optional, have defaults): `COMPANIES` (default `Google`, used by the `community` source), `ENABLED_SOURCES` (default `community`).
 
 2. **Install ntfy on your phone** ([iOS](https://apps.apple.com/us/app/ntfy/id1625396347) / [Android](https://play.google.com/store/apps/details?id=io.heckel.ntfy)) and subscribe to the same topic you put in `NTFY_TOPIC`.
