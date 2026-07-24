@@ -1,4 +1,4 @@
-# notify-actions
+# job-alerts
 
 Watches for new internship postings and pushes an alert to your phone (via [ntfy](https://ntfy.sh)) and email, the moment one goes live. Runs entirely on GitHub Actions on a 15-minute cron - nothing runs on your machine.
 

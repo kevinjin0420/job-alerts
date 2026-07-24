@@ -19,7 +19,7 @@ class CommunityListSource:
         self._target_companies = {name.strip().lower() for name in target_companies if name.strip()}
 
     def fetch(self) -> list[Listing]:
-        request = urllib.request.Request(LISTINGS_URL, headers={"User-Agent": "notify-actions-watcher"})
+        request = urllib.request.Request(LISTINGS_URL, headers={"User-Agent": "job-alerts-watcher"})
         with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
             payload = response.read()
         parsed = json.loads(payload)

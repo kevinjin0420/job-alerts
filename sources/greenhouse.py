@@ -25,7 +25,7 @@ class GreenhouseSource:
 
     def fetch(self) -> list[Listing]:
         url = f"https://boards-api.greenhouse.io/v1/boards/{self._board_token}/jobs"
-        request = urllib.request.Request(url, headers={"User-Agent": "notify-actions-watcher"})
+        request = urllib.request.Request(url, headers={"User-Agent": "job-alerts-watcher"})
         with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
             payload = response.read()
         parsed = json.loads(payload)

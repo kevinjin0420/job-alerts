@@ -18,6 +18,12 @@
       "Effect": "Allow",
       "Action": "s3:ListBucket",
       "Resource": "arn:aws:s3:::notify-actions-state-863516093571"
+    },
+    {
+      "Sid": "ConfigCenter",
+      "Effect": "Allow",
+      "Action": ["ssm:GetParameter", "ssm:GetParameters", "ssm:GetParametersByPath"],
+      "Resource": "arn:aws:ssm:*:863516093571:parameter/notify-actions/*"
     }
   ]
 }
