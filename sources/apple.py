@@ -3,9 +3,8 @@ from __future__ import annotations
 import json
 import re
 import urllib.parse
-import urllib.request
 
-from .base import Listing
+from .base import Listing, fetch_url
 
 REQUEST_TIMEOUT_SECONDS = 30
 HYDRATION_DATA_PATTERN = re.compile(r'window\.__staticRouterHydrationData = JSON\.parse\("(.*?)"\);', re.DOTALL)
@@ -28,9 +27,9 @@ class AppleJobsSource:
     def fetch(self) -> list[Listing]:
         query = urllib.parse.urlencode({"search": self._search_term})
         url = f"https://jobs.apple.com/en-us/search?{query}"
-        request = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-        with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
-            html = response.read().decode("utf-8", errors="replace")
+        html = fetch_url(self.name, url, headers={"User-Agent": "Mozilla/5.0"}, timeout=REQUEST_TIMEOUT_SECONDS).decode(
+            "utf-8", errors="replace"
+        )
 
         match = HYDRATION_DATA_PATTERN.search(html)
         if match is None:

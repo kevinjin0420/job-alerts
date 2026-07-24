@@ -1,0 +1,11 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "SelfRename",
+      "Effect": "Allow",
+      "Action": "iam:UpdateUser",
+      "Resource": "arn:aws:iam::863516093571:user/notify-actions-deployer"
+    }
+  ]
+}

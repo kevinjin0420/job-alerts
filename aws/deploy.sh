@@ -4,14 +4,31 @@ set -euo pipefail
 PROFILE="${AWS_PROFILE:-notify-actions}"
 REGION="${AWS_REGION:-us-west-1}"
 ACCOUNT_ID="863516093571"
-BUCKET="notify-actions-state-${ACCOUNT_ID}"
-FUNCTION_NAME="notify-actions-watch"
-ROLE_NAME="notify-actions-lambda-role"
-RULE_NAME="notify-actions-watch-schedule"
+BUCKET="job-alerts-state-${ACCOUNT_ID}"
+FUNCTION_NAME="job-alerts-watch"
+ROLE_NAME="job-alerts-lambda-role"
+RULE_NAME="job-alerts-watch-schedule"
 RUNTIME="python3.12"
 HANDLER="lambda_function.handler"
 
 AWS=(aws --profile "${PROFILE}" --region "${REGION}")
+
+# The deployer's IAM policy grants lambda:GetFunction but not
+# lambda:GetFunctionConfiguration, which `aws lambda wait` needs. Poll
+# GetFunction (which returns the same LastUpdateStatus) instead.
+wait_for_function_updated() {
+  local function_name="$1"
+  local status
+  for _ in $(seq 1 30); do
+    status=$("${AWS[@]}" lambda get-function --function-name "${function_name}" --query 'Configuration.LastUpdateStatus' --output text)
+    if [ "${status}" = "Successful" ]; then
+      return 0
+    fi
+    sleep 2
+  done
+  echo "Timed out waiting for ${function_name} to finish updating (last status: ${status})" >&2
+  return 1
+}
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(dirname "${SCRIPT_DIR}")"
@@ -52,7 +69,7 @@ if ! "${AWS[@]}" iam get-role --role-name "${ROLE_NAME}" >/dev/null 2>&1; then
 else
   ROLE_JUST_CREATED=0
 fi
-"${AWS[@]}" iam put-role-policy --role-name "${ROLE_NAME}" --policy-name notify-actions-lambda-exec \
+"${AWS[@]}" iam put-role-policy --role-name "${ROLE_NAME}" --policy-name job-alerts-lambda-exec \
   --policy-document "file://${SCRIPT_DIR}/lambda-exec-policy.json"
 ROLE_ARN=$("${AWS[@]}" iam get-role --role-name "${ROLE_NAME}" --query 'Role.Arn' --output text)
 
@@ -63,7 +80,7 @@ fi
 
 echo "==> Building deployment package"
 STAGE_DIR="$(mktemp -d)"
-ZIP_PATH="$(mktemp -u /tmp/notify-actions-XXXXXX).zip"
+ZIP_PATH="$(mktemp -u /tmp/job-alerts-XXXXXX).zip"
 trap 'rm -rf "${STAGE_DIR}" "${ZIP_PATH}"' EXIT
 cp "${REPO_ROOT}"/*.py "${STAGE_DIR}/"
 cp -r "${REPO_ROOT}/sources" "${STAGE_DIR}/sources"
@@ -72,17 +89,20 @@ cp -r "${REPO_ROOT}/sources" "${STAGE_DIR}/sources"
 echo "==> Writing Lambda environment config"
 ENV_JSON="${STAGE_DIR}/env.json"
 STATE_BUCKET="${BUCKET}" NTFY_TOPIC="${NTFY_TOPIC}" EMAIL_TO="${EMAIL_TO}" SMTP_USER="${SMTP_USER}" \
-  SMTP_PASS="${SMTP_PASS}" COMPANIES="${COMPANIES}" ENABLED_SOURCES="${ENABLED_SOURCES}" python3 -c '
+  SMTP_PASS="${SMTP_PASS}" COMPANIES="${COMPANIES}" ENABLED_SOURCES="${ENABLED_SOURCES}" \
+  OPENROUTER_API_KEY="${OPENROUTER_API_KEY:-}" python3 -c '
 import json, os, sys
-keys = ["STATE_BUCKET", "NTFY_TOPIC", "EMAIL_TO", "SMTP_USER", "SMTP_PASS", "COMPANIES", "ENABLED_SOURCES"]
-variables = {k: os.environ[k] for k in keys}
+required_keys = ["STATE_BUCKET", "NTFY_TOPIC", "EMAIL_TO", "SMTP_USER", "SMTP_PASS", "COMPANIES", "ENABLED_SOURCES"]
+variables = {k: os.environ[k] for k in required_keys}
+if os.environ.get("OPENROUTER_API_KEY"):
+    variables["OPENROUTER_API_KEY"] = os.environ["OPENROUTER_API_KEY"]
 json.dump({"Variables": variables}, sys.stdout)
 ' > "${ENV_JSON}"
 
 echo "==> Deploying Lambda function: ${FUNCTION_NAME}"
 if "${AWS[@]}" lambda get-function --function-name "${FUNCTION_NAME}" >/dev/null 2>&1; then
   "${AWS[@]}" lambda update-function-code --function-name "${FUNCTION_NAME}" --zip-file "fileb://${ZIP_PATH}" >/dev/null
-  "${AWS[@]}" lambda wait function-updated --function-name "${FUNCTION_NAME}"
+  wait_for_function_updated "${FUNCTION_NAME}"
   "${AWS[@]}" lambda update-function-configuration --function-name "${FUNCTION_NAME}" \
     --runtime "${RUNTIME}" --handler "${HANDLER}" --timeout 60 --memory-size 256 \
     --environment "file://${ENV_JSON}" >/dev/null
@@ -92,7 +112,7 @@ else
     --zip-file "fileb://${ZIP_PATH}" --timeout 60 --memory-size 256 \
     --environment "file://${ENV_JSON}" >/dev/null
 fi
-"${AWS[@]}" lambda wait function-updated --function-name "${FUNCTION_NAME}"
+wait_for_function_updated "${FUNCTION_NAME}"
 FUNCTION_ARN=$("${AWS[@]}" lambda get-function --function-name "${FUNCTION_NAME}" --query 'Configuration.FunctionArn' --output text)
 
 echo "==> Scheduling (${SCHEDULE_RATE}): ${RULE_NAME}"

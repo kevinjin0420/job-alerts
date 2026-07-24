@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import json
-import urllib.request
 
-from .base import Listing
+from .base import Listing, fetch_url
 
 LISTINGS_URL = "https://raw.githubusercontent.com/vanshb03/Summer2027-Internships/dev/.github/scripts/listings.json"
 REQUEST_TIMEOUT_SECONDS = 30
@@ -19,9 +18,9 @@ class CommunityListSource:
         self._target_companies = {name.strip().lower() for name in target_companies if name.strip()}
 
     def fetch(self) -> list[Listing]:
-        request = urllib.request.Request(LISTINGS_URL, headers={"User-Agent": "job-alerts-watcher"})
-        with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
-            payload = response.read()
+        payload = fetch_url(
+            self.name, LISTINGS_URL, headers={"User-Agent": "job-alerts-watcher"}, timeout=REQUEST_TIMEOUT_SECONDS
+        )
         parsed = json.loads(payload)
         if not isinstance(parsed, list):
             raise ValueError("listings.json did not contain a JSON array")

@@ -2,9 +2,8 @@ from __future__ import annotations
 
 import json
 import re
-import urllib.request
 
-from .base import Listing
+from .base import Listing, fetch_url
 
 REQUEST_TIMEOUT_SECONDS = 30
 INTERNSHIP_TITLE_PATTERN = re.compile(r"\bintern(s|ship)?\b", re.IGNORECASE)
@@ -25,9 +24,9 @@ class GreenhouseSource:
 
     def fetch(self) -> list[Listing]:
         url = f"https://boards-api.greenhouse.io/v1/boards/{self._board_token}/jobs"
-        request = urllib.request.Request(url, headers={"User-Agent": "job-alerts-watcher"})
-        with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
-            payload = response.read()
+        payload = fetch_url(
+            self.name, url, headers={"User-Agent": "job-alerts-watcher"}, timeout=REQUEST_TIMEOUT_SECONDS
+        )
         parsed = json.loads(payload)
         jobs = parsed.get("jobs", []) if isinstance(parsed, dict) else []
 

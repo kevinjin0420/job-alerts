@@ -4,6 +4,8 @@ from __future__ import annotations
 import os
 import sys
 
+from classifier import ClassifierError, is_good_fit
+from config import load_config
 from notifiers import NotificationError, notify
 from sources import Listing, Source, build_sources
 from storage import load_seen_ids, save_seen_ids, seen_file_exists
@@ -25,6 +27,22 @@ def get_email_recipients() -> list[str]:
 def get_enabled_source_specs() -> list[str]:
     raw = os.environ.get("ENABLED_SOURCES") or DEFAULT_ENABLED_SOURCES
     return [spec.strip() for spec in raw.split(",") if spec.strip()]
+
+
+def passes_classifier(openrouter_api_key: str | None, classifier_model: str, fit_prompt: str, listing: Listing) -> bool:
+    """True means "notify". Disabled (no key, no prompt, or unedited placeholder
+    prompt) and any API failure both fail open rather than silently suppressing
+    a real listing."""
+    if not openrouter_api_key or not fit_prompt or fit_prompt.startswith("PLACEHOLDER"):
+        return True
+    try:
+        return is_good_fit(openrouter_api_key, classifier_model, fit_prompt, listing)
+    except ClassifierError as error:
+        print(
+            f"Classifier failed for {listing.company_name} - {listing.title}, notifying anyway: {error}",
+            file=sys.stderr,
+        )
+        return True
 
 
 def fetch_all_listings(sources: list[Source]) -> list[Listing]:
@@ -58,6 +76,11 @@ def main() -> int:
         print(f"Invalid ENABLED_SOURCES configuration: {error}", file=sys.stderr)
         return 1
 
+    config = load_config()
+    fit_prompt = str(config.get("fit_prompt", ""))
+    classifier_model = str(config.get("classifier_model", ""))
+    openrouter_api_key = os.environ.get("OPENROUTER_API_KEY")
+
     is_first_run = not seen_file_exists()
     all_listings = fetch_all_listings(sources)
     seen_ids = load_seen_ids()
@@ -70,9 +93,14 @@ def main() -> int:
 
     new_listings = [listing for listing in all_listings if listing.unique_id not in seen_ids]
     successfully_notified_ids: set[str] = set()
+    rejected_ids: set[str] = set()
     had_notification_failure = False
 
     for listing in new_listings:
+        if not passes_classifier(openrouter_api_key, classifier_model, fit_prompt, listing):
+            rejected_ids.add(listing.unique_id)
+            print(f"Classifier rejected: {listing.company_name} - {listing.title}")
+            continue
         try:
             notify(ntfy_topic, smtp_user, smtp_pass, email_recipients, listing)
         except NotificationError as error:
@@ -85,8 +113,13 @@ def main() -> int:
         successfully_notified_ids.add(listing.unique_id)
         print(f"Notified: {listing.company_name} - {listing.title}")
 
-    # Unnotified new listings stay out of seen_ids so they're retried next run.
-    save_seen_ids(seen_ids | successfully_notified_ids)
+    # Notify-failures stay out of seen_ids so they're retried next run.
+    # Classifier-rejected listings go in so they aren't reclassified (and rebilled) every run.
+    save_seen_ids(seen_ids | successfully_notified_ids | rejected_ids)
+    print(
+        f"Scan complete: {len(new_listings)} new, {len(successfully_notified_ids)} notified, "
+        f"{len(rejected_ids)} rejected by classifier"
+    )
     return 1 if had_notification_failure else 0
 
 

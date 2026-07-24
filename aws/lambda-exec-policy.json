@@ -5,25 +5,25 @@
       "Sid": "Logs",
       "Effect": "Allow",
       "Action": ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"],
-      "Resource": "arn:aws:logs:*:863516093571:log-group:/aws/lambda/notify-actions-watch:*"
+      "Resource": "arn:aws:logs:*:863516093571:log-group:/aws/lambda/job-alerts-watch:*"
     },
     {
       "Sid": "State",
       "Effect": "Allow",
       "Action": ["s3:GetObject", "s3:PutObject"],
-      "Resource": "arn:aws:s3:::notify-actions-state-863516093571/seen.json"
+      "Resource": "arn:aws:s3:::job-alerts-state-863516093571/seen.json"
     },
     {
       "Sid": "StateBucketList",
       "Effect": "Allow",
       "Action": "s3:ListBucket",
-      "Resource": "arn:aws:s3:::notify-actions-state-863516093571"
+      "Resource": "arn:aws:s3:::job-alerts-state-863516093571"
     },
     {
       "Sid": "ConfigCenter",
       "Effect": "Allow",
       "Action": ["ssm:GetParameter", "ssm:GetParameters", "ssm:GetParametersByPath"],
-      "Resource": "arn:aws:ssm:*:863516093571:parameter/notify-actions/*"
+      "Resource": "arn:aws:ssm:*:863516093571:parameter/job-alerts/*"
     }
   ]
 }

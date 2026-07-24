@@ -1,0 +1,35 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "StateBucketProvision",
+      "Effect": "Allow",
+      "Action": ["s3:CreateBucket", "s3:PutBucketPublicAccessBlock", "s3:GetObject", "s3:PutObject", "s3:ListBucket"],
+      "Resource": ["arn:aws:s3:::job-alerts-state-863516093571", "arn:aws:s3:::job-alerts-state-863516093571/*"]
+    },
+    {
+      "Sid": "LambdaRoleProvision",
+      "Effect": "Allow",
+      "Action": ["iam:GetRole", "iam:CreateRole", "iam:PutRolePolicy", "iam:GetRolePolicy"],
+      "Resource": "arn:aws:iam::863516093571:role/job-alerts-lambda-role"
+    },
+    {
+      "Sid": "PassLambdaRole",
+      "Effect": "Allow",
+      "Action": "iam:PassRole",
+      "Resource": "arn:aws:iam::863516093571:role/job-alerts-lambda-role"
+    },
+    {
+      "Sid": "LambdaFunctionProvision",
+      "Effect": "Allow",
+      "Action": ["lambda:GetFunction", "lambda:CreateFunction", "lambda:UpdateFunctionCode", "lambda:UpdateFunctionConfiguration", "lambda:AddPermission"],
+      "Resource": "arn:aws:lambda:us-west-1:863516093571:function:job-alerts-watch"
+    },
+    {
+      "Sid": "ScheduleRuleProvision",
+      "Effect": "Allow",
+      "Action": ["events:PutRule", "events:PutTargets", "events:DescribeRule", "events:ListTargetsByRule"],
+      "Resource": "arn:aws:events:us-west-1:863516093571:rule/job-alerts-watch-schedule"
+    }
+  ]
+}

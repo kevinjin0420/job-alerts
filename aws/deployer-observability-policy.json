@@ -1,0 +1,23 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "MetricFilters",
+      "Effect": "Allow",
+      "Action": ["logs:PutMetricFilter", "logs:DescribeMetricFilters", "logs:DescribeLogGroups", "logs:FilterLogEvents", "logs:GetLogEvents"],
+      "Resource": "arn:aws:logs:us-west-1:863516093571:log-group:/aws/lambda/job-alerts-watch:*"
+    },
+    {
+      "Sid": "Dashboard",
+      "Effect": "Allow",
+      "Action": ["cloudwatch:PutDashboard", "cloudwatch:GetDashboard", "cloudwatch:DeleteDashboards", "cloudwatch:ListDashboards"],
+      "Resource": "arn:aws:cloudwatch::863516093571:dashboard/job-alerts"
+    },
+    {
+      "Sid": "MetricRead",
+      "Effect": "Allow",
+      "Action": ["cloudwatch:GetMetricData", "cloudwatch:GetMetricStatistics", "cloudwatch:ListMetrics"],
+      "Resource": "*"
+    }
+  ]
+}
