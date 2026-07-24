@@ -3,6 +3,7 @@ from __future__ import annotations
 from .apple import AppleJobsSource
 from .base import Listing, Source
 from .community import CommunityListSource
+from .google import GoogleJobsSource
 from .greenhouse import GreenhouseSource
 
 __all__ = ["Listing", "Source", "build_sources"]
@@ -15,6 +16,7 @@ def build_sources(enabled_source_specs: list[str], community_companies: list[str
       - "community"                          -> crowd-sourced list, filtered to COMPANIES
       - "greenhouse:<CompanyName>:<token>"   -> direct Greenhouse boards-api query
       - "apple"                              -> Apple careers page scrape
+      - "google"                             -> Google careers page scrape
 
     Add a new kind by writing a class with a `name` attribute and a
     `fetch() -> list[Listing]` method, then registering its spec prefix here.
@@ -34,6 +36,8 @@ def build_sources(enabled_source_specs: list[str], community_companies: list[str
             sources.append(GreenhouseSource(company_name, board_token))
         elif kind == "apple":
             sources.append(AppleJobsSource())
+        elif kind == "google":
+            sources.append(GoogleJobsSource())
         else:
             raise ValueError(f"Unknown source kind: {kind!r}")
     return sources
