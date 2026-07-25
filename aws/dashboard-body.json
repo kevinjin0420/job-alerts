@@ -94,6 +94,19 @@
           ["job-alerts", "ClassifierOutputTokens", { "stat": "Average" }]
         ]
       }
+    },
+    {
+      "type": "metric",
+      "x": 0, "y": 18, "width": 6, "height": 6,
+      "properties": {
+        "title": "Last Ran",
+        "region": "us-west-1",
+        "view": "singleValue",
+        "period": 300,
+        "metrics": [
+          ["AWS/Lambda", "Invocations", "FunctionName", "job-alerts-watch", { "stat": "Sum" }]
+        ]
+      }
     }
   ]
 }
