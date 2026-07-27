@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>job-alerts dashboard</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #ffffff;
+    --fg: #1a1a1a;
+    --muted: #666;
+    --border: #ddd;
+    --card-bg: #f7f7f8;
+    --danger: #b3261e;
+    --accent: #2563eb;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #16181c;
+      --fg: #e8e8e8;
+      --muted: #999;
+      --border: #333;
+      --card-bg: #202226;
+      --danger: #ff6b6b;
+      --accent: #6ea8fe;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 1.5rem;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    max-width: 1000px;
+    margin: 0 auto;
+  }
+  h1 { font-size: 1.3rem; margin-bottom: 0.25rem; }
+  .sub { color: var(--muted); font-size: 0.85rem; margin-bottom: 1.5rem; }
+  section { margin-bottom: 2rem; }
+  h2 { font-size: 1rem; margin-bottom: 0.75rem; }
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 0.75rem;
+  }
+  .card {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.75rem 1rem;
+  }
+  .card .label { color: var(--muted); font-size: 0.75rem; }
+  .card .value { font-size: 1.4rem; font-weight: 600; }
+  label { display: block; font-size: 0.85rem; margin: 0.75rem 0 0.25rem; color: var(--muted); }
+  input[type=text], textarea {
+    width: 100%;
+    background: var(--card-bg);
+    color: var(--fg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.5rem;
+    font-family: inherit;
+    font-size: 0.9rem;
+  }
+  textarea { min-height: 140px; resize: vertical; font-family: ui-monospace, monospace; }
+  button {
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    padding: 0.5rem 1rem;
+    font-size: 0.9rem;
+    cursor: pointer;
+    margin-top: 0.75rem;
+  }
+  button.secondary { background: transparent; color: var(--fg); border: 1px solid var(--border); }
+  #status { font-size: 0.85rem; margin-left: 0.75rem; color: var(--muted); }
+  #logs {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.5rem 0.75rem;
+    max-height: 420px;
+    overflow-y: auto;
+    font-family: ui-monospace, monospace;
+    font-size: 0.8rem;
+    white-space: pre-wrap;
+  }
+  .log-line { padding: 1px 0; }
+  .log-line.failure { color: var(--danger); }
+  .log-time { color: var(--muted); margin-right: 0.5rem; }
+  .toolbar { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.5rem; }
+  #gate {
+    max-width: 360px;
+    margin: 4rem auto;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+
+<div id="gate">
+  <h1>job-alerts dashboard</h1>
+  <p class="sub">Enter your password to continue</p>
+  <input type="password" id="password-input" placeholder="Password">
+  <button id="unlock-btn">Unlock</button>
+</div>
+
+<div id="app" style="display:none">
+  <h1>job-alerts dashboard</h1>
+  <p class="sub">Last 24 hours &middot; <button class="secondary" id="refresh-btn">Refresh</button></p>
+
+  <section>
+    <h2>Metrics</h2>
+    <div class="cards" id="metric-cards"></div>
+  </section>
+
+  <section>
+    <h2>Config</h2>
+    <label>Fit prompt</label>
+    <textarea id="fit-prompt"></textarea>
+    <label>Classifier model</label>
+    <input type="text" id="classifier-model">
+    <label>Companies (comma-separated)</label>
+    <input type="text" id="companies">
+    <label>Enabled sources (comma-separated)</label>
+    <input type="text" id="enabled-sources">
+    <label>Email recipients (comma-separated)</label>
+    <input type="text" id="email-to">
+    <button id="save-config-btn">Save config</button>
+    <span id="status"></span>
+  </section>
+
+  <section>
+    <h2>Recent logs</h2>
+    <div class="toolbar">
+      <label style="margin:0"><input type="checkbox" id="failures-only"> Failures only</label>
+    </div>
+    <div id="logs"></div>
+  </section>
+</div>
+
+<script>
+const PASSWORD_STORAGE = "job-alerts-dashboard-password";
+
+function password() {
+  return localStorage.getItem(PASSWORD_STORAGE) || "";
+}
+
+async function apiFetch(path, options = {}) {
+  const response = await fetch(path, {
+    ...options,
+    headers: { ...(options.headers || {}), "X-Dashboard-Password": password() },
+  });
+  if (response.status === 401) {
+    localStorage.removeItem(PASSWORD_STORAGE);
+    showGate();
+    throw new Error("unauthorized");
+  }
+  return response;
+}
+
+function showGate() {
+  document.getElementById("gate").style.display = "block";
+  document.getElementById("app").style.display = "none";
+}
+
+function showApp() {
+  document.getElementById("gate").style.display = "none";
+  document.getElementById("app").style.display = "block";
+  loadMetrics();
+  loadConfig();
+  loadLogs();
+}
+
+document.getElementById("unlock-btn").addEventListener("click", () => {
+  const value = document.getElementById("password-input").value;
+  if (!value) return;
+  localStorage.setItem(PASSWORD_STORAGE, value);
+  showApp();
+});
+
+document.getElementById("refresh-btn").addEventListener("click", () => {
+  loadMetrics();
+  loadLogs();
+});
+
+document.getElementById("failures-only").addEventListener("change", loadLogs);
+
+const METRIC_LABELS = {
+  invocations_24h: "Invocations",
+  errors_24h: "Errors",
+  avg_duration_ms: "Avg duration (ms)",
+  notifications_sent_24h: "Notifications sent",
+  classifier_calls_24h: "Classifier calls",
+  avg_input_tokens: "Avg input tokens",
+  avg_output_tokens: "Avg output tokens",
+  last_ran: "Last ran",
+};
+
+function formatValue(key, value) {
+  if (value === null || value === undefined) return "-";
+  if (key === "last_ran") return new Date(value).toLocaleString();
+  return value;
+}
+
+async function loadMetrics() {
+  const response = await apiFetch("/api/metrics");
+  const metrics = await response.json();
+  const container = document.getElementById("metric-cards");
+  container.innerHTML = "";
+  for (const [key, label] of Object.entries(METRIC_LABELS)) {
+    const card = document.createElement("div");
+    card.className = "card";
+    card.innerHTML = `<div class="label">${label}</div><div class="value">${formatValue(key, metrics[key])}</div>`;
+    container.appendChild(card);
+  }
+}
+
+async function loadConfig() {
+  const response = await apiFetch("/api/config");
+  const config = await response.json();
+  document.getElementById("fit-prompt").value = config.fit_prompt || "";
+  document.getElementById("classifier-model").value = config.classifier_model || "";
+  document.getElementById("companies").value = (config.companies || []).join(", ");
+  document.getElementById("enabled-sources").value = (config.enabled_sources || []).join(", ");
+  document.getElementById("email-to").value = (config.email_to || []).join(", ");
+}
+
+function splitList(value) {
+  return value.split(",").map((item) => item.trim()).filter(Boolean);
+}
+
+document.getElementById("save-config-btn").addEventListener("click", async () => {
+  const status = document.getElementById("status");
+  status.textContent = "Saving...";
+  const body = {
+    fit_prompt: document.getElementById("fit-prompt").value,
+    classifier_model: document.getElementById("classifier-model").value.trim(),
+    companies: splitList(document.getElementById("companies").value),
+    enabled_sources: splitList(document.getElementById("enabled-sources").value),
+    email_to: splitList(document.getElementById("email-to").value),
+  };
+  try {
+    await apiFetch("/api/config", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    status.textContent = "Saved";
+  } catch (error) {
+    status.textContent = "Failed to save";
+  }
+  setTimeout(() => { status.textContent = ""; }, 3000);
+});
+
+async function loadLogs() {
+  const response = await apiFetch("/api/logs");
+  const data = await response.json();
+  const failuresOnly = document.getElementById("failures-only").checked;
+  const container = document.getElementById("logs");
+  container.innerHTML = "";
+  for (const event of data.events) {
+    if (failuresOnly && !event.is_failure) continue;
+    const line = document.createElement("div");
+    line.className = "log-line" + (event.is_failure ? " failure" : "");
+    const time = new Date(event.timestamp).toLocaleTimeString();
+    line.innerHTML = `<span class="log-time">${time}</span>${event.message.replace(/</g, "&lt;")}`;
+    container.appendChild(line);
+  }
+}
+
+if (password()) {
+  showApp();
+} else {
+  showGate();
+}
+
+setInterval(() => {
+  if (password()) { loadMetrics(); loadLogs(); }
+}, 60000);
+</script>
+
+</body>
+</html>

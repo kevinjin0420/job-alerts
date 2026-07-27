@@ -10,23 +10,26 @@ from notifiers import NotificationError, notify
 from sources import Listing, Source, build_sources
 from storage import load_seen_ids, save_seen_ids, seen_file_exists
 
-DEFAULT_ENABLED_SOURCES = "community"
-DEFAULT_COMPANIES = "Google"
+DEFAULT_ENABLED_SOURCES = ["community"]
 
 
-def get_target_companies() -> list[str]:
-    raw = os.environ.get("COMPANIES") or DEFAULT_COMPANIES
-    return [name.strip() for name in raw.split(",") if name.strip()]
+def _string_list(config: dict[str, object], key: str) -> list[str]:
+    raw = config.get(key, [])
+    if not isinstance(raw, list):
+        return []
+    return [str(item).strip() for item in raw if str(item).strip()]
 
 
-def get_email_recipients() -> list[str]:
-    raw = os.environ.get("EMAIL_TO") or ""
-    return [address.strip() for address in raw.split(",") if address.strip()]
+def get_target_companies(config: dict[str, object]) -> list[str]:
+    return _string_list(config, "companies")
 
 
-def get_enabled_source_specs() -> list[str]:
-    raw = os.environ.get("ENABLED_SOURCES") or DEFAULT_ENABLED_SOURCES
-    return [spec.strip() for spec in raw.split(",") if spec.strip()]
+def get_email_recipients(config: dict[str, object]) -> list[str]:
+    return _string_list(config, "email_to")
+
+
+def get_enabled_source_specs(config: dict[str, object]) -> list[str]:
+    return _string_list(config, "enabled_sources") or DEFAULT_ENABLED_SOURCES
 
 
 def passes_classifier(openrouter_api_key: str | None, classifier_model: str, fit_prompt: str, listing: Listing) -> bool:
@@ -60,23 +63,27 @@ def fetch_all_listings(sources: list[Source]) -> list[Listing]:
 
 def main() -> int:
     ntfy_topic = os.environ.get("NTFY_TOPIC")
-    email_recipients = get_email_recipients()
     smtp_user = os.environ.get("SMTP_USER")
     smtp_pass = os.environ.get("SMTP_PASS")
-    if not ntfy_topic or not email_recipients or not smtp_user or not smtp_pass:
+    if not ntfy_topic or not smtp_user or not smtp_pass:
         print(
-            "Missing required environment variables: NTFY_TOPIC, EMAIL_TO, SMTP_USER, SMTP_PASS",
+            "Missing required environment variables: NTFY_TOPIC, SMTP_USER, SMTP_PASS",
             file=sys.stderr,
         )
         return 1
 
-    try:
-        sources = build_sources(get_enabled_source_specs(), get_target_companies())
-    except ValueError as error:
-        print(f"Invalid ENABLED_SOURCES configuration: {error}", file=sys.stderr)
+    config = load_config()
+    email_recipients = get_email_recipients(config)
+    if not email_recipients:
+        print("Missing required config: email_to", file=sys.stderr)
         return 1
 
-    config = load_config()
+    try:
+        sources = build_sources(get_enabled_source_specs(config), get_target_companies(config))
+    except ValueError as error:
+        print(f"Invalid enabled_sources configuration: {error}", file=sys.stderr)
+        return 1
+
     fit_prompt = str(config.get("fit_prompt", ""))
     classifier_model = str(config.get("classifier_model", ""))
     openrouter_api_key = os.environ.get("OPENROUTER_API_KEY")

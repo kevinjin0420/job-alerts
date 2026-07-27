@@ -38,7 +38,7 @@ if [ -f "${SCRIPT_DIR}/.env" ]; then
   source "${SCRIPT_DIR}/.env"
 fi
 
-for var in NTFY_TOPIC EMAIL_TO SMTP_USER SMTP_PASS; do
+for var in NTFY_TOPIC SMTP_USER SMTP_PASS; do
   if [ -z "${!var:-}" ]; then
     echo "Missing required secret: ${var} (set it in aws/.env or export it)" >&2
     exit 1
@@ -47,7 +47,7 @@ done
 
 # shellcheck source=config.env
 source "${SCRIPT_DIR}/config.env"
-for var in SCHEDULE_RATE COMPANIES ENABLED_SOURCES; do
+for var in SCHEDULE_RATE; do
   if [ -z "${!var:-}" ]; then
     echo "Missing required setting in aws/config.env: ${var}" >&2
     exit 1
@@ -88,11 +88,10 @@ cp -r "${REPO_ROOT}/sources" "${STAGE_DIR}/sources"
 
 echo "==> Writing Lambda environment config"
 ENV_JSON="${STAGE_DIR}/env.json"
-STATE_BUCKET="${BUCKET}" NTFY_TOPIC="${NTFY_TOPIC}" EMAIL_TO="${EMAIL_TO}" SMTP_USER="${SMTP_USER}" \
-  SMTP_PASS="${SMTP_PASS}" COMPANIES="${COMPANIES}" ENABLED_SOURCES="${ENABLED_SOURCES}" \
-  OPENROUTER_API_KEY="${OPENROUTER_API_KEY:-}" python3 -c '
+STATE_BUCKET="${BUCKET}" NTFY_TOPIC="${NTFY_TOPIC}" SMTP_USER="${SMTP_USER}" \
+  SMTP_PASS="${SMTP_PASS}" OPENROUTER_API_KEY="${OPENROUTER_API_KEY:-}" python3 -c '
 import json, os, sys
-required_keys = ["STATE_BUCKET", "NTFY_TOPIC", "EMAIL_TO", "SMTP_USER", "SMTP_PASS", "COMPANIES", "ENABLED_SOURCES"]
+required_keys = ["STATE_BUCKET", "NTFY_TOPIC", "SMTP_USER", "SMTP_PASS"]
 variables = {k: os.environ[k] for k in required_keys}
 if os.environ.get("OPENROUTER_API_KEY"):
     variables["OPENROUTER_API_KEY"] = os.environ["OPENROUTER_API_KEY"]
