@@ -1,4 +1,4 @@
-# job-alerts
+# Kevin's Job Alerts
 
 Watches for new internship postings at big tech companies and pushes an alert to your phone and email as soon as a listing goes live. 
 
