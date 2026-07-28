@@ -6,66 +6,90 @@
 <title>job-alerts dashboard - config</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <script>tailwind.config = { darkMode: "media" };</script>
+<style>
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background-color: rgb(212 212 212); border-radius: 9999px; border: 2px solid transparent; background-clip: content-box; }
+  html { scrollbar-color: rgb(212 212 212) transparent; scrollbar-width: thin; }
+  @media (prefers-color-scheme: dark) {
+    ::-webkit-scrollbar-thumb { background-color: rgb(64 64 64); }
+    html { scrollbar-color: rgb(64 64 64) transparent; }
+  }
+</style>
 </head>
-<body class="bg-gray-50 dark:bg-gray-950 text-gray-900 dark:text-gray-100 min-h-screen">
+<body class="bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100 min-h-screen">
 
 <div id="gate" class="min-h-screen flex items-center justify-center p-6">
-  <div class="w-full max-w-sm rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-8 shadow-sm text-center">
-    <h1 class="text-lg font-semibold">job-alerts dashboard</h1>
-    <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">Enter your password to continue</p>
+  <div class="w-full max-w-sm rounded-sm border border-neutral-300 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-8 text-center">
+    <h1 class="text-sm font-semibold tracking-wide uppercase">job-alerts</h1>
+    <p class="mt-1 text-sm text-neutral-500 dark:text-neutral-500">Enter your password to continue</p>
     <input type="password" id="password-input" placeholder="Password"
-      class="mt-4 w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+      class="mt-4 w-full rounded-sm border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-neutral-500">
     <button id="unlock-btn"
-      class="mt-3 w-full rounded-md bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-2">
+      class="mt-3 w-full rounded-sm bg-neutral-900 hover:bg-neutral-700 dark:bg-neutral-100 dark:hover:bg-neutral-300 text-white dark:text-neutral-900 text-sm font-medium px-4 py-2">
       Unlock
     </button>
   </div>
 </div>
 
-<div id="app" class="hidden max-w-3xl mx-auto p-6">
-  <h1 class="text-lg font-semibold mb-4">job-alerts dashboard</h1>
-  <nav class="flex gap-1 border-b border-gray-200 dark:border-gray-800 mb-6">
-    <a href="/metrics" class="px-3 py-2 text-sm font-medium border-b-2 border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">Metrics</a>
-    <a href="/config" class="px-3 py-2 text-sm font-medium border-b-2 border-blue-600 text-blue-600 dark:text-blue-400">Config</a>
-    <a href="/logs" class="px-3 py-2 text-sm font-medium border-b-2 border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">Logs</a>
-  </nav>
+<div id="app" class="hidden flex min-h-screen">
+  <aside class="w-52 shrink-0 border-r border-neutral-200 dark:border-neutral-800 p-6">
+    <div class="text-xs font-semibold tracking-widest uppercase mb-8">job-alerts</div>
+    <nav class="flex flex-col gap-1 text-sm">
+      <a href="/metrics" class="px-3 py-2 rounded-sm text-neutral-600 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-900">Metrics</a>
+      <a href="/config" class="px-3 py-2 rounded-sm font-medium bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900">Config</a>
+      <a href="/logs" class="px-3 py-2 rounded-sm text-neutral-600 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-900">Logs</a>
+    </nav>
+  </aside>
 
-  <div class="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 space-y-4">
-    <div>
-      <label class="block text-sm font-medium mb-1">Fit prompt</label>
-      <textarea id="fit-prompt" rows="10"
-        class="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"></textarea>
-    </div>
-    <div class="grid sm:grid-cols-2 gap-4">
-      <div>
-        <label class="block text-sm font-medium mb-1">Classifier model</label>
-        <input type="text" id="classifier-model"
-          class="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-      </div>
-      <div>
-        <label class="block text-sm font-medium mb-1">Companies</label>
-        <input type="text" id="companies" placeholder="google, apple, tesla"
-          class="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-      </div>
-      <div>
-        <label class="block text-sm font-medium mb-1">Enabled sources</label>
-        <input type="text" id="enabled-sources" placeholder="community, apple, google"
-          class="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-      </div>
-      <div>
-        <label class="block text-sm font-medium mb-1">Email recipients</label>
-        <input type="text" id="email-to" placeholder="you@example.com"
-          class="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+  <main class="flex-1 p-8">
+    <div class="flex items-center justify-between mb-6">
+      <h2 class="text-xs font-semibold tracking-widest uppercase text-neutral-500 dark:text-neutral-500">Config</h2>
+      <div class="flex items-center gap-3">
+        <span id="status" class="text-sm text-neutral-500 dark:text-neutral-500"></span>
+        <button id="save-config-btn"
+          class="rounded-sm bg-neutral-900 hover:bg-neutral-700 dark:bg-neutral-100 dark:hover:bg-neutral-300 text-white dark:text-neutral-900 text-sm font-medium px-4 py-2">
+          Save config
+        </button>
       </div>
     </div>
-    <div class="flex items-center gap-3 pt-1">
-      <button id="save-config-btn"
-        class="rounded-md bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-2">
-        Save config
-      </button>
-      <span id="status" class="text-sm text-gray-500 dark:text-gray-400"></span>
+
+    <div class="grid lg:grid-cols-2 gap-6 items-start">
+      <div class="border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-6">
+        <label class="block text-xs font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-500 mb-2">Fit prompt</label>
+        <textarea id="fit-prompt" rows="22"
+          class="w-full rounded-sm border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm font-mono leading-6 focus:outline-none focus:ring-1 focus:ring-neutral-500"></textarea>
+      </div>
+
+      <div class="space-y-6">
+        <div class="border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-6">
+          <label class="block text-xs font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-500 mb-2">Classifier model</label>
+          <input type="text" id="classifier-model"
+            class="w-full rounded-sm border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-neutral-500">
+        </div>
+
+        <div class="border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-6">
+          <label class="block text-xs font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-500 mb-2">Companies</label>
+          <input type="text" id="company-search" placeholder="Search companies…"
+            class="w-full rounded-sm border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm mb-3 focus:outline-none focus:ring-1 focus:ring-neutral-500">
+          <div id="company-checkboxes"
+            class="max-h-48 overflow-y-auto rounded-sm border border-neutral-200 dark:border-neutral-700 divide-y divide-neutral-200 dark:divide-neutral-800"></div>
+        </div>
+
+        <div class="border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-6">
+          <label class="block text-xs font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-500 mb-2">Enabled sources</label>
+          <div id="source-checkboxes"
+            class="rounded-sm border border-neutral-200 dark:border-neutral-700 divide-y divide-neutral-200 dark:divide-neutral-800"></div>
+        </div>
+
+        <div class="border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-6">
+          <label class="block text-xs font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-500 mb-2">Email recipients</label>
+          <input type="text" id="email-to" placeholder="you@example.com"
+            class="w-full rounded-sm border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-neutral-500">
+        </div>
+      </div>
     </div>
-  </div>
+  </main>
 </div>
 
 <script>
@@ -106,18 +130,68 @@ document.getElementById("unlock-btn").addEventListener("click", () => {
   showApp();
 });
 
-async function loadConfig() {
-  const response = await apiFetch("/api/config");
-  const config = await response.json();
-  document.getElementById("fit-prompt").value = config.fit_prompt || "";
-  document.getElementById("classifier-model").value = config.classifier_model || "";
-  document.getElementById("companies").value = (config.companies || []).join(", ");
-  document.getElementById("enabled-sources").value = (config.enabled_sources || []).join(", ");
-  document.getElementById("email-to").value = (config.email_to || []).join(", ");
+function renderCheckboxes(container, options, selected, idPrefix) {
+  container.innerHTML = "";
+  const selectedLower = new Set(selected.map((value) => value.toLowerCase()));
+  for (const option of options) {
+    const id = `${idPrefix}-${option.toLowerCase()}`;
+    const row = document.createElement("label");
+    row.className = "flex items-center gap-2 px-3 py-2 text-sm cursor-pointer hover:bg-neutral-50 dark:hover:bg-neutral-800";
+    row.dataset.optionLabel = option.toLowerCase();
+    row.innerHTML = `
+      <input type="checkbox" id="${id}" value="${option}" class="rounded-sm border-neutral-300 dark:border-neutral-700"
+        ${selectedLower.has(option.toLowerCase()) ? "checked" : ""}>
+      ${option}
+    `;
+    container.appendChild(row);
+  }
 }
 
-function splitList(value) {
-  return value.split(",").map((item) => item.trim()).filter(Boolean);
+function checkedValues(container) {
+  return Array.from(container.querySelectorAll("input[type=checkbox]:checked")).map((input) => input.value);
+}
+
+document.getElementById("company-search").addEventListener("input", (event) => {
+  const query = event.target.value.trim().toLowerCase();
+  const container = document.getElementById("company-checkboxes");
+  let anyVisible = false;
+  for (const row of container.children) {
+    if (row.dataset.optionLabel === undefined) continue;
+    const matches = row.dataset.optionLabel.includes(query);
+    row.classList.toggle("hidden", !matches);
+    anyVisible = anyVisible || matches;
+  }
+  let emptyMessage = container.querySelector("[data-empty-message]");
+  if (!anyVisible && !emptyMessage) {
+    emptyMessage = document.createElement("div");
+    emptyMessage.dataset.emptyMessage = "true";
+    emptyMessage.className = "px-3 py-4 text-sm text-neutral-500 dark:text-neutral-500 text-center";
+    emptyMessage.textContent = "No companies match your search";
+    container.appendChild(emptyMessage);
+  } else if (anyVisible && emptyMessage) {
+    emptyMessage.remove();
+  }
+});
+
+async function loadConfig() {
+  const status = document.getElementById("status");
+  status.textContent = "Loading config…";
+  try {
+    const [configResponse, optionsResponse] = await Promise.all([
+      apiFetch("/api/config"),
+      apiFetch("/api/options"),
+    ]);
+    const config = await configResponse.json();
+    const options = await optionsResponse.json();
+    document.getElementById("fit-prompt").value = config.fit_prompt || "";
+    document.getElementById("classifier-model").value = config.classifier_model || "";
+    document.getElementById("email-to").value = (config.email_to || []).join(", ");
+    renderCheckboxes(document.getElementById("company-checkboxes"), options.companies, config.companies || [], "company");
+    renderCheckboxes(document.getElementById("source-checkboxes"), options.sources, config.enabled_sources || [], "source");
+    status.textContent = "";
+  } catch (error) {
+    status.textContent = "Failed to load config";
+  }
 }
 
 document.getElementById("save-config-btn").addEventListener("click", async () => {
@@ -126,9 +200,9 @@ document.getElementById("save-config-btn").addEventListener("click", async () =>
   const body = {
     fit_prompt: document.getElementById("fit-prompt").value,
     classifier_model: document.getElementById("classifier-model").value.trim(),
-    companies: splitList(document.getElementById("companies").value),
-    enabled_sources: splitList(document.getElementById("enabled-sources").value),
-    email_to: splitList(document.getElementById("email-to").value),
+    companies: checkedValues(document.getElementById("company-checkboxes")),
+    enabled_sources: checkedValues(document.getElementById("source-checkboxes")),
+    email_to: document.getElementById("email-to").value.split(",").map((item) => item.trim()).filter(Boolean),
   };
   try {
     await apiFetch("/api/config", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });

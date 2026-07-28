@@ -9,7 +9,7 @@ from typing import Any
 
 import boto3
 
-from config import load_config, save_config
+from config import SUPPORTED_COMPANIES, SUPPORTED_SOURCE_KINDS, load_config, save_config
 
 WATCH_LOG_GROUP = "/aws/lambda/job-alerts-watch"
 WATCH_FUNCTION_NAME = "job-alerts-watch"
@@ -40,6 +40,8 @@ def handler(event: dict[str, Any], _context: object) -> dict[str, Any]:
     if not hmac.compare_digest(headers.get("x-dashboard-password", ""), DASHBOARD_PASSWORD):
         return _json_response(401, {"error": "unauthorized"})
 
+    if method == "GET" and path == "/api/options":
+        return _json_response(200, {"companies": SUPPORTED_COMPANIES, "sources": SUPPORTED_SOURCE_KINDS})
     if method == "GET" and path == "/api/config":
         return _json_response(200, load_config())
     if method == "PUT" and path == "/api/config":

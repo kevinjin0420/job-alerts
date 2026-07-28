@@ -5,7 +5,7 @@
       "Sid": "MetricFilters",
       "Effect": "Allow",
       "Action": ["logs:PutMetricFilter", "logs:DescribeMetricFilters", "logs:DescribeLogGroups", "logs:FilterLogEvents", "logs:GetLogEvents"],
-      "Resource": "arn:aws:logs:us-west-1:863516093571:log-group:/aws/lambda/job-alerts-watch:*"
+      "Resource": "arn:aws:logs:us-west-1:863516093571:log-group:/aws/lambda/job-alerts-*:*"
     },
     {
       "Sid": "Dashboard",

@@ -42,13 +42,13 @@ fi
 echo "==> Ensuring execution role exists: ${ROLE_NAME}"
 if ! "${AWS[@]}" iam get-role --role-name "${ROLE_NAME}" >/dev/null 2>&1; then
   "${AWS[@]}" iam create-role --role-name "${ROLE_NAME}" \
-    --assume-role-policy-document "file://${SCRIPT_DIR}/lambda-trust-policy.json" >/dev/null
+    --assume-role-policy-document "file://${SCRIPT_DIR}/roles/trust-policy.json" >/dev/null
   ROLE_JUST_CREATED=1
 else
   ROLE_JUST_CREATED=0
 fi
 "${AWS[@]}" iam put-role-policy --role-name "${ROLE_NAME}" --policy-name job-alerts-dashboard-exec \
-  --policy-document "file://${SCRIPT_DIR}/dashboard-exec-policy.json"
+  --policy-document "file://${SCRIPT_DIR}/roles/dashboard-exec-policy.json"
 ROLE_ARN=$("${AWS[@]}" iam get-role --role-name "${ROLE_NAME}" --query 'Role.Arn' --output text)
 
 if [ "${ROLE_JUST_CREATED}" = "1" ]; then

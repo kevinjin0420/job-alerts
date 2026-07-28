@@ -1,0 +1,33 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "StateBucket",
+      "Effect": "Allow",
+      "Action": ["s3:CreateBucket", "s3:PutBucketPublicAccessBlock", "s3:GetObject", "s3:PutObject", "s3:ListBucket"],
+      "Resource": ["arn:aws:s3:::job-alerts-*", "arn:aws:s3:::job-alerts-*/*"]
+    },
+    {
+      "Sid": "Tables",
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:CreateTable",
+        "dynamodb:DescribeTable",
+        "dynamodb:UpdateTable",
+        "dynamodb:PutItem",
+        "dynamodb:GetItem",
+        "dynamodb:UpdateItem",
+        "dynamodb:DeleteItem",
+        "dynamodb:Query",
+        "dynamodb:Scan"
+      ],
+      "Resource": "arn:aws:dynamodb:*:863516093571:table/job-alerts-*"
+    },
+    {
+      "Sid": "ConfigCenter",
+      "Effect": "Allow",
+      "Action": ["ssm:GetParameter", "ssm:PutParameter", "ssm:GetParameters", "ssm:GetParametersByPath"],
+      "Resource": "arn:aws:ssm:*:863516093571:parameter/job-alerts/*"
+    }
+  ]
+}
