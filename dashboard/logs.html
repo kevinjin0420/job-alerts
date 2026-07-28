@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>job-alerts dashboard - logs</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>tailwind.config = { darkMode: "media" };</script>
+</head>
+<body class="bg-gray-50 dark:bg-gray-950 text-gray-900 dark:text-gray-100 min-h-screen">
+
+<div id="gate" class="min-h-screen flex items-center justify-center p-6">
+  <div class="w-full max-w-sm rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-8 shadow-sm text-center">
+    <h1 class="text-lg font-semibold">job-alerts dashboard</h1>
+    <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">Enter your password to continue</p>
+    <input type="password" id="password-input" placeholder="Password"
+      class="mt-4 w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+    <button id="unlock-btn"
+      class="mt-3 w-full rounded-md bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-2">
+      Unlock
+    </button>
+  </div>
+</div>
+
+<div id="app" class="hidden max-w-3xl mx-auto p-6">
+  <h1 class="text-lg font-semibold mb-4">job-alerts dashboard</h1>
+  <nav class="flex gap-1 border-b border-gray-200 dark:border-gray-800 mb-6">
+    <a href="/metrics" class="px-3 py-2 text-sm font-medium border-b-2 border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">Metrics</a>
+    <a href="/config" class="px-3 py-2 text-sm font-medium border-b-2 border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">Config</a>
+    <a href="/logs" class="px-3 py-2 text-sm font-medium border-b-2 border-blue-600 text-blue-600 dark:text-blue-400">Logs</a>
+  </nav>
+
+  <div class="flex items-center justify-between mb-3">
+    <label class="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
+      <input type="checkbox" id="failures-only" class="rounded border-gray-300 dark:border-gray-700">
+      Failures only
+    </label>
+    <button id="refresh-btn"
+      class="text-sm px-3 py-1.5 rounded-md border border-gray-300 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800">
+      Refresh
+    </button>
+  </div>
+
+  <div id="logs"
+    class="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-4 max-h-[600px] overflow-y-auto font-mono text-xs leading-5"></div>
+</div>
+
+<script>
+const PASSWORD_STORAGE = "job-alerts-dashboard-password";
+
+function password() {
+  return localStorage.getItem(PASSWORD_STORAGE) || "";
+}
+
+async function apiFetch(path, options = {}) {
+  const response = await fetch(path, {
+    ...options,
+    headers: { ...(options.headers || {}), "X-Dashboard-Password": password() },
+  });
+  if (response.status === 401) {
+    localStorage.removeItem(PASSWORD_STORAGE);
+    showGate();
+    throw new Error("unauthorized");
+  }
+  return response;
+}
+
+function showGate() {
+  document.getElementById("gate").classList.remove("hidden");
+  document.getElementById("app").classList.add("hidden");
+}
+
+function showApp() {
+  document.getElementById("gate").classList.add("hidden");
+  document.getElementById("app").classList.remove("hidden");
+  loadLogs();
+}
+
+document.getElementById("unlock-btn").addEventListener("click", () => {
+  const value = document.getElementById("password-input").value;
+  if (!value) return;
+  localStorage.setItem(PASSWORD_STORAGE, value);
+  showApp();
+});
+
+document.getElementById("refresh-btn").addEventListener("click", loadLogs);
+document.getElementById("failures-only").addEventListener("change", loadLogs);
+
+async function loadLogs() {
+  const response = await apiFetch("/api/logs");
+  const data = await response.json();
+  const failuresOnly = document.getElementById("failures-only").checked;
+  const container = document.getElementById("logs");
+  container.innerHTML = "";
+  for (const event of data.events) {
+    if (failuresOnly && !event.is_failure) continue;
+    const line = document.createElement("div");
+    line.className = event.is_failure
+      ? "text-red-600 dark:text-red-400"
+      : "text-gray-700 dark:text-gray-300";
+    const time = new Date(event.timestamp).toLocaleTimeString();
+    line.innerHTML = `<span class="text-gray-400 dark:text-gray-600 mr-2">${time}</span>${event.message.replace(/</g, "&lt;")}`;
+    container.appendChild(line);
+  }
+}
+
+if (password()) {
+  showApp();
+} else {
+  showGate();
+}
+
+setInterval(() => { if (password()) loadLogs(); }, 60000);
+</script>
+
+</body>
+</html>

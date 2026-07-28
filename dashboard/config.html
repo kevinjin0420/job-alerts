@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>job-alerts dashboard - config</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>tailwind.config = { darkMode: "media" };</script>
+</head>
+<body class="bg-gray-50 dark:bg-gray-950 text-gray-900 dark:text-gray-100 min-h-screen">
+
+<div id="gate" class="min-h-screen flex items-center justify-center p-6">
+  <div class="w-full max-w-sm rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-8 shadow-sm text-center">
+    <h1 class="text-lg font-semibold">job-alerts dashboard</h1>
+    <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">Enter your password to continue</p>
+    <input type="password" id="password-input" placeholder="Password"
+      class="mt-4 w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+    <button id="unlock-btn"
+      class="mt-3 w-full rounded-md bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-2">
+      Unlock
+    </button>
+  </div>
+</div>
+
+<div id="app" class="hidden max-w-3xl mx-auto p-6">
+  <h1 class="text-lg font-semibold mb-4">job-alerts dashboard</h1>
+  <nav class="flex gap-1 border-b border-gray-200 dark:border-gray-800 mb-6">
+    <a href="/metrics" class="px-3 py-2 text-sm font-medium border-b-2 border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">Metrics</a>
+    <a href="/config" class="px-3 py-2 text-sm font-medium border-b-2 border-blue-600 text-blue-600 dark:text-blue-400">Config</a>
+    <a href="/logs" class="px-3 py-2 text-sm font-medium border-b-2 border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">Logs</a>
+  </nav>
+
+  <div class="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 space-y-4">
+    <div>
+      <label class="block text-sm font-medium mb-1">Fit prompt</label>
+      <textarea id="fit-prompt" rows="10"
+        class="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"></textarea>
+    </div>
+    <div class="grid sm:grid-cols-2 gap-4">
+      <div>
+        <label class="block text-sm font-medium mb-1">Classifier model</label>
+        <input type="text" id="classifier-model"
+          class="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+      </div>
+      <div>
+        <label class="block text-sm font-medium mb-1">Companies</label>
+        <input type="text" id="companies" placeholder="google, apple, tesla"
+          class="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+      </div>
+      <div>
+        <label class="block text-sm font-medium mb-1">Enabled sources</label>
+        <input type="text" id="enabled-sources" placeholder="community, apple, google"
+          class="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+      </div>
+      <div>
+        <label class="block text-sm font-medium mb-1">Email recipients</label>
+        <input type="text" id="email-to" placeholder="you@example.com"
+          class="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+      </div>
+    </div>
+    <div class="flex items-center gap-3 pt-1">
+      <button id="save-config-btn"
+        class="rounded-md bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-2">
+        Save config
+      </button>
+      <span id="status" class="text-sm text-gray-500 dark:text-gray-400"></span>
+    </div>
+  </div>
+</div>
+
+<script>
+const PASSWORD_STORAGE = "job-alerts-dashboard-password";
+
+function password() {
+  return localStorage.getItem(PASSWORD_STORAGE) || "";
+}
+
+async function apiFetch(path, options = {}) {
+  const response = await fetch(path, {
+    ...options,
+    headers: { ...(options.headers || {}), "X-Dashboard-Password": password() },
+  });
+  if (response.status === 401) {
+    localStorage.removeItem(PASSWORD_STORAGE);
+    showGate();
+    throw new Error("unauthorized");
+  }
+  return response;
+}
+
+function showGate() {
+  document.getElementById("gate").classList.remove("hidden");
+  document.getElementById("app").classList.add("hidden");
+}
+
+function showApp() {
+  document.getElementById("gate").classList.add("hidden");
+  document.getElementById("app").classList.remove("hidden");
+  loadConfig();
+}
+
+document.getElementById("unlock-btn").addEventListener("click", () => {
+  const value = document.getElementById("password-input").value;
+  if (!value) return;
+  localStorage.setItem(PASSWORD_STORAGE, value);
+  showApp();
+});
+
+async function loadConfig() {
+  const response = await apiFetch("/api/config");
+  const config = await response.json();
+  document.getElementById("fit-prompt").value = config.fit_prompt || "";
+  document.getElementById("classifier-model").value = config.classifier_model || "";
+  document.getElementById("companies").value = (config.companies || []).join(", ");
+  document.getElementById("enabled-sources").value = (config.enabled_sources || []).join(", ");
+  document.getElementById("email-to").value = (config.email_to || []).join(", ");
+}
+
+function splitList(value) {
+  return value.split(",").map((item) => item.trim()).filter(Boolean);
+}
+
+document.getElementById("save-config-btn").addEventListener("click", async () => {
+  const status = document.getElementById("status");
+  status.textContent = "Saving...";
+  const body = {
+    fit_prompt: document.getElementById("fit-prompt").value,
+    classifier_model: document.getElementById("classifier-model").value.trim(),
+    companies: splitList(document.getElementById("companies").value),
+    enabled_sources: splitList(document.getElementById("enabled-sources").value),
+    email_to: splitList(document.getElementById("email-to").value),
+  };
+  try {
+    await apiFetch("/api/config", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    status.textContent = "Saved";
+  } catch (error) {
+    status.textContent = "Failed to save";
+  }
+  setTimeout(() => { status.textContent = ""; }, 3000);
+});
+
+if (password()) {
+  showApp();
+} else {
+  showGate();
+}
+</script>
+
+</body>
+</html>

@@ -61,7 +61,7 @@ STAGE_DIR="$(mktemp -d)"
 ZIP_PATH="$(mktemp -u /tmp/job-alerts-dashboard-XXXXXX).zip"
 trap 'rm -rf "${STAGE_DIR}" "${ZIP_PATH}"' EXIT
 cp "${REPO_ROOT}/dashboard/app.py" "${STAGE_DIR}/"
-cp "${REPO_ROOT}/dashboard/index.html" "${STAGE_DIR}/"
+cp "${REPO_ROOT}/dashboard/metrics.html" "${REPO_ROOT}/dashboard/config.html" "${REPO_ROOT}/dashboard/logs.html" "${STAGE_DIR}/"
 cp "${REPO_ROOT}/config.py" "${STAGE_DIR}/"
 (cd "${STAGE_DIR}" && zip -qr "${ZIP_PATH}" .)
 

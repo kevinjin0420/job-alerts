@@ -37,8 +37,22 @@
       "Action": ["apigateway:GET", "apigateway:POST", "apigateway:PATCH", "apigateway:DELETE", "apigateway:PUT"],
       "Resource": [
         "arn:aws:apigateway:us-west-1::/apis",
-        "arn:aws:apigateway:us-west-1::/apis/*"
+        "arn:aws:apigateway:us-west-1::/apis/*",
+        "arn:aws:apigateway:us-west-1::/domainnames",
+        "arn:aws:apigateway:us-west-1::/domainnames/*"
       ]
+    },
+    {
+      "Sid": "DashboardCertificate",
+      "Effect": "Allow",
+      "Action": ["acm:RequestCertificate", "acm:DescribeCertificate", "acm:ListCertificates", "acm:AddTagsToCertificate"],
+      "Resource": "*"
+    },
+    {
+      "Sid": "ApiGatewayServiceLinkedRole",
+      "Effect": "Allow",
+      "Action": "iam:CreateServiceLinkedRole",
+      "Resource": "arn:aws:iam::863516093571:role/aws-service-role/ops.apigateway.amazonaws.com/AWSServiceRoleForAPIGateway"
     }
   ]
 }

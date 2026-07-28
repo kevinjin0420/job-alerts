@@ -18,7 +18,11 @@ DASHBOARD_PASSWORD = os.environ["DASHBOARD_PASSWORD"]
 logs_client = boto3.client("logs")
 cloudwatch_client = boto3.client("cloudwatch")
 
-INDEX_HTML = (Path(__file__).parent / "index.html").read_text()
+PAGES = {
+    "/metrics": (Path(__file__).parent / "metrics.html").read_text(),
+    "/config": (Path(__file__).parent / "config.html").read_text(),
+    "/logs": (Path(__file__).parent / "logs.html").read_text(),
+}
 
 FAILURE_MARKERS = ("fail", "Fail", "FAIL", "Error", "ERROR", "Traceback")
 
@@ -28,7 +32,9 @@ def handler(event: dict[str, Any], _context: object) -> dict[str, Any]:
     path = event["rawPath"]
 
     if method == "GET" and path == "/":
-        return _response(200, "text/html", INDEX_HTML)
+        return _redirect("/metrics")
+    if method == "GET" and path in PAGES:
+        return _response(200, "text/html", PAGES[path])
 
     headers = {key.lower(): value for key, value in (event.get("headers") or {}).items()}
     if not hmac.compare_digest(headers.get("x-dashboard-password", ""), DASHBOARD_PASSWORD):
@@ -117,6 +123,10 @@ def _recent_metrics(hours: int = 24) -> dict[str, Any]:
         "avg_input_tokens": latest("avg_input_tokens"),
         "avg_output_tokens": latest("avg_output_tokens"),
     }
+
+
+def _redirect(location: str) -> dict[str, Any]:
+    return {"statusCode": 302, "headers": {"location": location}, "body": ""}
 
 
 def _json_response(status_code: int, body: dict[str, Any]) -> dict[str, Any]:
