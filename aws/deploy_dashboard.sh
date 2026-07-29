@@ -8,6 +8,8 @@ FUNCTION_NAME="job-alerts-dashboard"
 ROLE_NAME="job-alerts-dashboard-role"
 RUNTIME="python3.12"
 HANDLER="app.handler"
+COGNITO_USER_POOL_ID="us-west-1_eEd1CGYWQ"
+COGNITO_CLIENT_ID="v439vcnaat90hltipaokccv16"
 
 AWS=(aws --profile "${PROFILE}" --region "${REGION}")
 
@@ -34,11 +36,6 @@ if [ -f "${ENV_FILE}" ]; then
   source "${ENV_FILE}"
 fi
 
-if [ -z "${DASHBOARD_PASSWORD:-}" ]; then
-  echo "Missing DASHBOARD_PASSWORD: add DASHBOARD_PASSWORD=\"your-password\" to aws/.env, then rerun." >&2
-  exit 1
-fi
-
 echo "==> Ensuring execution role exists: ${ROLE_NAME}"
 if ! "${AWS[@]}" iam get-role --role-name "${ROLE_NAME}" >/dev/null 2>&1; then
   "${AWS[@]}" iam create-role --role-name "${ROLE_NAME}" \
@@ -61,15 +58,23 @@ STAGE_DIR="$(mktemp -d)"
 ZIP_PATH="$(mktemp -u /tmp/job-alerts-dashboard-XXXXXX).zip"
 trap 'rm -rf "${STAGE_DIR}" "${ZIP_PATH}"' EXIT
 cp "${REPO_ROOT}/dashboard/app.py" "${STAGE_DIR}/"
-cp "${REPO_ROOT}/dashboard/metrics.html" "${REPO_ROOT}/dashboard/config.html" "${REPO_ROOT}/dashboard/logs.html" "${STAGE_DIR}/"
-cp "${REPO_ROOT}/config.py" "${STAGE_DIR}/"
+cp "${REPO_ROOT}/dashboard/metrics.html" "${REPO_ROOT}/dashboard/config.html" "${REPO_ROOT}/dashboard/logs.html" "${REPO_ROOT}/dashboard/admin.html" "${REPO_ROOT}/dashboard/listings.html" "${STAGE_DIR}/"
+cp "${REPO_ROOT}/config.py" "${REPO_ROOT}/users.py" "${REPO_ROOT}/classifier.py" "${STAGE_DIR}/"
+cp -r "${REPO_ROOT}/sources" "${STAGE_DIR}/sources"
 (cd "${STAGE_DIR}" && zip -qr "${ZIP_PATH}" .)
 
 echo "==> Writing Lambda environment config"
 ENV_JSON="${STAGE_DIR}/env.json"
-DASHBOARD_PASSWORD="${DASHBOARD_PASSWORD}" python3 -c '
+COGNITO_USER_POOL_ID="${COGNITO_USER_POOL_ID}" COGNITO_CLIENT_ID="${COGNITO_CLIENT_ID}" \
+  OPENROUTER_API_KEY="${OPENROUTER_API_KEY:-}" python3 -c '
 import json, os, sys
-json.dump({"Variables": {"DASHBOARD_PASSWORD": os.environ["DASHBOARD_PASSWORD"]}}, sys.stdout)
+variables = {
+    "COGNITO_USER_POOL_ID": os.environ["COGNITO_USER_POOL_ID"],
+    "COGNITO_CLIENT_ID": os.environ["COGNITO_CLIENT_ID"],
+}
+if os.environ.get("OPENROUTER_API_KEY"):
+    variables["OPENROUTER_API_KEY"] = os.environ["OPENROUTER_API_KEY"]
+json.dump({"Variables": variables}, sys.stdout)
 ' > "${ENV_JSON}"
 
 echo "==> Deploying Lambda function: ${FUNCTION_NAME}"

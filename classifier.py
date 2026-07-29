@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import urllib.error
 import urllib.request
+from dataclasses import dataclass
 
 from sources.base import Listing
 
@@ -15,7 +16,13 @@ class ClassifierError(Exception):
     pass
 
 
-def is_good_fit(api_key: str, model: str, fit_prompt: str, listing: Listing) -> bool:
+@dataclass(frozen=True)
+class ClassificationResult:
+    fits: bool
+    reason: str
+
+
+def is_good_fit(api_key: str, model: str, fit_prompt: str, listing: Listing) -> ClassificationResult:
     listing_text = (
         f"Company: {listing.company_name}\n"
         f"Title: {listing.title}\n"
@@ -28,7 +35,11 @@ def is_good_fit(api_key: str, model: str, fit_prompt: str, listing: Listing) -> 
             "messages": [
                 # Some providers (e.g. Alibaba/Qwen) reject json_schema response_format
                 # unless the word "json" literally appears in the messages.
-                {"role": "system", "content": f'{fit_prompt}\n\nRespond with a JSON object: {{"fits": true or false}}.'},
+                {
+                    "role": "system",
+                    "content": f'{fit_prompt}\n\nRespond with a JSON object: '
+                    '{"fits": true or false, "reason": "one short sentence explaining why"}.',
+                },
                 {"role": "user", "content": listing_text},
             ],
             "response_format": {
@@ -38,13 +49,16 @@ def is_good_fit(api_key: str, model: str, fit_prompt: str, listing: Listing) -> 
                     "strict": True,
                     "schema": {
                         "type": "object",
-                        "properties": {"fits": {"type": "boolean"}},
-                        "required": ["fits"],
+                        "properties": {
+                            "fits": {"type": "boolean"},
+                            "reason": {"type": "string"},
+                        },
+                        "required": ["fits", "reason"],
                         "additionalProperties": False,
                     },
                 },
             },
-            "max_tokens": 20,
+            "max_tokens": 150,
         }
     ).encode("utf-8")
     request = urllib.request.Request(
@@ -61,7 +75,8 @@ def is_good_fit(api_key: str, model: str, fit_prompt: str, listing: Listing) -> 
 
     try:
         content = payload["choices"][0]["message"]["content"]
-        fits = bool(json.loads(content)["fits"])
+        parsed = json.loads(content)
+        result = ClassificationResult(fits=bool(parsed["fits"]), reason=str(parsed["reason"]))
     except (KeyError, IndexError, TypeError, json.JSONDecodeError) as error:
         raise ClassifierError(f"Unexpected OpenRouter response shape: {payload}") from error
 
@@ -75,11 +90,11 @@ def is_good_fit(api_key: str, model: str, fit_prompt: str, listing: Listing) -> 
             {
                 "event": "classifier_call",
                 "model": model,
-                "fit": fits,
+                "fit": result.fits,
                 "input_tokens": input_tokens,
                 "output_tokens": output_tokens,
             }
         )
     )
 
-    return fits
+    return result

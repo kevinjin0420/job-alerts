@@ -8,22 +8,10 @@
       "Resource": "arn:aws:logs:*:863516093571:log-group:/aws/lambda/job-alerts-watch:*"
     },
     {
-      "Sid": "State",
+      "Sid": "UserData",
       "Effect": "Allow",
-      "Action": ["s3:GetObject", "s3:PutObject"],
-      "Resource": "arn:aws:s3:::job-alerts-state-863516093571/seen.json"
-    },
-    {
-      "Sid": "StateBucketList",
-      "Effect": "Allow",
-      "Action": "s3:ListBucket",
-      "Resource": "arn:aws:s3:::job-alerts-state-863516093571"
-    },
-    {
-      "Sid": "ConfigCenter",
-      "Effect": "Allow",
-      "Action": ["ssm:GetParameter", "ssm:GetParameters", "ssm:GetParametersByPath"],
-      "Resource": "arn:aws:ssm:*:863516093571:parameter/job-alerts/*"
+      "Action": ["dynamodb:Scan", "dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem", "dynamodb:Query"],
+      "Resource": "arn:aws:dynamodb:*:863516093571:table/job-alerts-*"
     }
   ]
 }

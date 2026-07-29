@@ -17,7 +17,7 @@
       "Sid": "UserAdmin",
       "Effect": "Allow",
       "Action": ["cognito-idp:AdminCreateUser", "cognito-idp:AdminDeleteUser", "cognito-idp:AdminGetUser", "cognito-idp:ListUsers"],
-      "Resource": "arn:aws:cognito-idp:us-west-1:863516093571:userpool/PLACEHOLDER"
+      "Resource": "arn:aws:cognito-idp:us-west-1:863516093571:userpool/us-west-1_eEd1CGYWQ"
     }
   ]
 }

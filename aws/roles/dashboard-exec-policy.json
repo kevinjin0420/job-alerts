@@ -14,16 +14,29 @@
       "Resource": "arn:aws:logs:*:863516093571:log-group:/aws/lambda/job-alerts-watch:*"
     },
     {
-      "Sid": "ConfigCenter",
-      "Effect": "Allow",
-      "Action": ["ssm:GetParameter", "ssm:PutParameter"],
-      "Resource": "arn:aws:ssm:*:863516093571:parameter/job-alerts/*"
-    },
-    {
       "Sid": "Metrics",
       "Effect": "Allow",
       "Action": "cloudwatch:GetMetricData",
       "Resource": "*"
+    },
+    {
+      "Sid": "UserData",
+      "Effect": "Allow",
+      "Action": ["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem", "dynamodb:DeleteItem", "dynamodb:Query", "dynamodb:Scan"],
+      "Resource": "arn:aws:dynamodb:*:863516093571:table/job-alerts-*"
+    },
+    {
+      "Sid": "CognitoAuth",
+      "Effect": "Allow",
+      "Action": [
+        "cognito-idp:InitiateAuth",
+        "cognito-idp:RespondToAuthChallenge",
+        "cognito-idp:GetUser",
+        "cognito-idp:AdminCreateUser",
+        "cognito-idp:AdminDeleteUser",
+        "cognito-idp:ListUsers"
+      ],
+      "Resource": "arn:aws:cognito-idp:us-west-1:863516093571:userpool/us-west-1_eEd1CGYWQ"
     }
   ]
 }

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>job-alerts dashboard - metrics</title>
+<title>job-alerts dashboard - listings</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <script>tailwind.config = { darkMode: "media" };</script>
 <style>
@@ -41,8 +41,8 @@
   <aside class="w-52 shrink-0 border-r border-neutral-200 dark:border-neutral-800 p-3">
     <div class="text-xs font-semibold tracking-widest uppercase mb-8">job-alerts</div>
     <nav class="flex flex-col gap-1 text-sm">
-      <a href="/metrics" class="px-3 py-2 rounded-sm font-medium bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900">Metrics</a>
-      <a href="/listings" class="px-3 py-2 rounded-sm text-neutral-600 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-900">Listings</a>
+      <a href="/metrics" class="px-3 py-2 rounded-sm text-neutral-600 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-900">Metrics</a>
+      <a href="/listings" class="px-3 py-2 rounded-sm font-medium bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900">Listings</a>
       <a href="/config" class="px-3 py-2 rounded-sm text-neutral-600 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-900">Config</a>
       <a href="/logs" id="logs-nav-link" class="hidden px-3 py-2 rounded-sm text-neutral-600 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-900">Logs</a>
       <a href="/admin" id="admin-nav-link" class="hidden px-3 py-2 rounded-sm text-neutral-600 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-900">Admin</a>
@@ -50,34 +50,37 @@
   </aside>
 
   <main class="flex-1 p-6">
-    <div class="flex items-baseline justify-between mb-6">
-      <h2 class="text-xs font-semibold tracking-widest uppercase text-neutral-500 dark:text-neutral-500">Metrics &middot; last 24h</h2>
-      <button id="refresh-btn"
-        class="text-xs px-3 py-1.5 rounded-sm border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-900">
-        Refresh
-      </button>
+    <div class="flex items-center justify-between mb-6">
+      <h2 class="text-xs font-semibold tracking-widest uppercase text-neutral-500 dark:text-neutral-500">Listings</h2>
+      <div class="flex items-center gap-4">
+        <select id="status-filter" class="text-xs rounded-sm border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-2 py-1.5">
+          <option value="">All statuses</option>
+          <option value="notified">Notified</option>
+          <option value="rejected">Rejected</option>
+          <option value="seeded">Seeded (first run)</option>
+        </select>
+        <button id="refresh-btn"
+          class="text-xs px-3 py-1.5 rounded-sm border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-900">
+          Refresh
+        </button>
+      </div>
     </div>
 
-    <div id="metric-sections" class="space-y-8"></div>
+    <div id="listings-table" class="border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900"></div>
   </main>
 </div>
 
 <script>
 const TOKEN_STORAGE = "job-alerts-access-token";
 let pendingSession = null;
+let allListings = [];
 
 function token() {
   return localStorage.getItem(TOKEN_STORAGE) || "";
 }
 
-// matches aws/config.env's SCHEDULE_RATE
-const SCHEDULE_INTERVAL_SECONDS = 300;
-let nextRunAt = null;
-
-function formatLocalDate(value) {
-  const date = new Date(value);
-  const pad = (n) => String(n).padStart(2, "0");
-  return `${date.getFullYear()}/${pad(date.getMonth() + 1)}/${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+function isoTime(value) {
+  return new Date(value * 1000).toISOString().replace(/\.\d{3}Z$/, "Z");
 }
 
 async function apiFetch(path, options = {}) {
@@ -113,7 +116,7 @@ async function showApp() {
   document.getElementById("gate").classList.add("hidden");
   document.getElementById("app").classList.remove("hidden");
   await setupNav();
-  loadMetrics();
+  loadListings();
 }
 
 document.getElementById("login-btn").addEventListener("click", async () => {
@@ -149,73 +152,87 @@ document.getElementById("login-btn").addEventListener("click", async () => {
   showApp();
 });
 
-document.getElementById("refresh-btn").addEventListener("click", loadMetrics);
-
-function formatNumber(value) {
-  return value === null || value === undefined ? "-" : value;
-}
-
-function formatPercent(numerator, denominator) {
-  if (!denominator) return "-";
-  return `${((numerator / denominator) * 100).toFixed(1)}%`;
-}
-
-function buildSections(metrics) {
-  nextRunAt = metrics.last_ran ? new Date(metrics.last_ran).getTime() + SCHEDULE_INTERVAL_SECONDS * 1000 : null;
-  return [
-    {
-      title: "Execution",
-      cards: [
-        ["Invocations", formatNumber(metrics.invocations_24h)],
-        ["Errors", formatNumber(metrics.errors_24h)],
-        ["Success rate", formatPercent(metrics.invocations_24h - metrics.errors_24h, metrics.invocations_24h)],
-        ["Avg duration (ms)", formatNumber(metrics.avg_duration_ms)],
-        ["Last ran", metrics.last_ran ? formatLocalDate(metrics.last_ran) : "-"],
-        ["Next scheduled run", nextRunAt ? formatLocalDate(nextRunAt) : "-"],
-      ],
-    },
-    {
-      title: "Your usage",
-      cards: [
-        ["Classifier calls this month", formatNumber(metrics.classifier_calls_this_month)],
-      ],
-    },
-  ];
-}
+document.getElementById("refresh-btn").addEventListener("click", loadListings);
+document.getElementById("status-filter").addEventListener("change", renderListings);
 
 function renderMessage(container, text, extraClass) {
-  container.innerHTML = `<div class="border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 px-4 py-6 text-sm ${extraClass}">${text}</div>`;
+  container.innerHTML = `<div class="px-4 py-6 text-sm ${extraClass}">${text}</div>`;
 }
 
-async function loadMetrics() {
-  const container = document.getElementById("metric-sections");
-  renderMessage(container, "Loading…", "text-neutral-500 dark:text-neutral-500");
-  let metrics;
-  try {
-    const response = await apiFetch("/api/metrics");
-    metrics = await response.json();
-  } catch (error) {
-    renderMessage(container, "Failed to load metrics", "text-red-600 dark:text-red-400");
+const STATUS_STYLES = {
+  notified: "text-green-700 dark:text-green-400",
+  rejected: "text-red-600 dark:text-red-400",
+  seeded: "text-neutral-500 dark:text-neutral-500",
+};
+
+function renderListings() {
+  const container = document.getElementById("listings-table");
+  const statusFilter = document.getElementById("status-filter").value;
+  const listings = statusFilter ? allListings.filter((item) => item.status === statusFilter) : allListings;
+
+  if (listings.length === 0) {
+    renderMessage(container, "No listings match", "text-neutral-500 dark:text-neutral-500");
     return;
   }
-  container.innerHTML = "";
-  for (const section of buildSections(metrics)) {
-    const wrapper = document.createElement("section");
-    const grid = document.createElement("div");
-    grid.className = "grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-px bg-neutral-200 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-800";
-    for (const [label, value] of section.cards) {
-      const card = document.createElement("div");
-      card.className = "bg-white dark:bg-neutral-900 px-4 py-4";
-      card.innerHTML = `
-        <div class="text-xs text-neutral-500 dark:text-neutral-500">${label}</div>
-        <div class="text-2xl font-mono mt-1">${value}</div>
-      `;
-      grid.appendChild(card);
+
+  const table = document.createElement("table");
+  table.className = "w-full text-sm";
+  table.innerHTML = `
+    <thead>
+      <tr class="border-b border-neutral-200 dark:border-neutral-800 text-left text-xs uppercase tracking-wide text-neutral-500 dark:text-neutral-500">
+        <th class="px-3 py-2 font-medium">Company</th>
+        <th class="px-3 py-2 font-medium">Title</th>
+        <th class="px-3 py-2 font-medium">Status</th>
+        <th class="px-3 py-2 font-medium">Reason</th>
+        <th class="px-3 py-2 font-medium">Seen</th>
+        <th class="px-3 py-2 font-medium"></th>
+      </tr>
+    </thead>
+  `;
+  const tbody = document.createElement("tbody");
+  for (const item of listings) {
+    const row = document.createElement("tr");
+    row.className = "border-b border-neutral-100 dark:border-neutral-900 last:border-0";
+    const title = item.title || "(unknown - seen before this tracking existed)";
+    const titleCell = item.url ? `<a href="${item.url}" target="_blank" class="hover:underline">${title}</a>` : title;
+    row.innerHTML = `
+      <td class="px-3 py-2">${item.company_name || "-"}</td>
+      <td class="px-3 py-2">${titleCell}</td>
+      <td class="px-3 py-2 ${STATUS_STYLES[item.status] || ""}">${item.status || "legacy"}</td>
+      <td class="px-3 py-2 text-neutral-500 dark:text-neutral-500">${item.reason || "-"}</td>
+      <td class="px-3 py-2 font-mono text-xs text-neutral-500 dark:text-neutral-500">${item.seen_at ? isoTime(item.seen_at) : "-"}</td>
+      <td class="px-3 py-2 text-right"></td>
+    `;
+    if (item.status === "rejected") {
+      const retryBtn = document.createElement("button");
+      retryBtn.textContent = "Retry";
+      retryBtn.className = "text-xs px-2 py-1 rounded-sm border border-neutral-300 dark:border-neutral-700 text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-900";
+      retryBtn.addEventListener("click", () => retryListing(item.listing_id));
+      row.lastElementChild.appendChild(retryBtn);
     }
-    wrapper.innerHTML = `<h3 class="text-xs font-semibold tracking-widest uppercase text-neutral-500 dark:text-neutral-500 mb-3">${section.title}</h3>`;
-    wrapper.appendChild(grid);
-    container.appendChild(wrapper);
+    tbody.appendChild(row);
   }
+  table.appendChild(tbody);
+  container.innerHTML = "";
+  container.appendChild(table);
+}
+
+async function loadListings() {
+  const container = document.getElementById("listings-table");
+  renderMessage(container, "Loading…", "text-neutral-500 dark:text-neutral-500");
+  try {
+    const response = await apiFetch("/api/listings");
+    ({ listings: allListings } = await response.json());
+  } catch (error) {
+    renderMessage(container, "Failed to load listings", "text-red-600 dark:text-red-400");
+    return;
+  }
+  renderListings();
+}
+
+async function retryListing(listingId) {
+  await apiFetch(`/api/listings/${encodeURIComponent(listingId)}`, { method: "DELETE" });
+  loadListings();
 }
 
 if (token()) {
@@ -223,8 +240,6 @@ if (token()) {
 } else {
   showGate();
 }
-
-setInterval(() => { if (token()) loadMetrics(); }, 60000);
 </script>
 
 </body>

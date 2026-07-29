@@ -4,13 +4,32 @@ from __future__ import annotations
 import os
 import sys
 
-from classifier import ClassifierError, is_good_fit
-from config import load_config
-from notifiers import NotificationError, notify
+from classifier import ClassificationResult, ClassifierError, is_good_fit
+from notifiers import NotificationError, notify, notify_message
 from sources import Listing, Source, build_sources
-from storage import load_seen_ids, save_seen_ids, seen_file_exists
+from sources.direct import DirectSource
+from users import (
+    current_month_usage,
+    has_notified_quota,
+    increment_usage,
+    is_source_alerted,
+    list_active_users,
+    list_all_users,
+    list_companies,
+    load_seen_ids,
+    load_user_config,
+    mark_quota_notified,
+    mark_source_alerted,
+    record_listings,
+    record_source_failure,
+    record_source_success,
+)
 
 DEFAULT_ENABLED_SOURCES = ["community"]
+DEFAULT_JOB_TYPES = ["intern"]
+MONTHLY_CLASSIFIER_CALL_CAP = 300
+SOURCE_FAILURE_ALERT_THRESHOLD = 3
+JOB_TYPE_URL_FIELDS = {"intern": "intern_url", "newgrad": "newgrad_url", "fulltime": "fulltime_url"}
 
 
 def _string_list(config: dict[str, object], key: str) -> list[str]:
@@ -32,12 +51,63 @@ def get_enabled_source_specs(config: dict[str, object]) -> list[str]:
     return _string_list(config, "enabled_sources") or DEFAULT_ENABLED_SOURCES
 
 
-def passes_classifier(openrouter_api_key: str | None, classifier_model: str, fit_prompt: str, listing: Listing) -> bool:
-    """True means "notify". Disabled (no key, no prompt, or unedited placeholder
+def get_job_types(config: dict[str, object]) -> list[str]:
+    return _string_list(config, "job_types") or DEFAULT_JOB_TYPES
+
+
+def build_company_catalog() -> dict[str, dict[str, object]]:
+    return {str(entry["company_name"]).strip().lower(): entry for entry in list_companies()}
+
+
+def resolve_source_specs(
+    base_specs: list[str], companies: list[str], catalog: dict[str, dict[str, object]]
+) -> list[str]:
+    """Auto-adds a greenhouse source for each selected company that the admin
+    catalog has a board token for, so users just pick companies - no need to
+    hand-type raw 'greenhouse:Name:token' spec strings."""
+    specs = list(base_specs)
+    for company in companies:
+        entry = catalog.get(company.strip().lower())
+        if entry and entry.get("source_kind") == "greenhouse" and entry.get("board_token"):
+            specs.append(f"greenhouse:{entry['company_name']}:{entry['board_token']}")
+    return specs
+
+
+def resolve_direct_pairs(config: dict[str, object]) -> set[tuple[str, str]]:
+    """(company, job_type) pairs this config actually wants - not a blind cross
+    product of all companies x all job types, so a shared fetch across users
+    never scrapes a combination nobody asked for."""
+    companies = get_target_companies(config)
+    job_types = get_job_types(config)
+    return {(company, job_type) for company in companies for job_type in job_types}
+
+
+def build_direct_sources(
+    pairs: set[tuple[str, str]], catalog: dict[str, dict[str, object]]
+) -> list[DirectSource]:
+    direct_sources: list[DirectSource] = []
+    for company, job_type in pairs:
+        entry = catalog.get(company.strip().lower())
+        if not entry or entry.get("source_kind") != "direct":
+            continue
+        url = entry.get(JOB_TYPE_URL_FIELDS.get(job_type, ""))
+        if url:
+            direct_sources.append(DirectSource(str(entry["company_name"]), str(url), job_type))
+    return direct_sources
+
+
+def classifier_enabled(openrouter_api_key: str | None, fit_prompt: str) -> bool:
+    return bool(openrouter_api_key) and bool(fit_prompt) and not fit_prompt.startswith("PLACEHOLDER")
+
+
+def passes_classifier(
+    openrouter_api_key: str | None, classifier_model: str, fit_prompt: str, listing: Listing
+) -> ClassificationResult:
+    """fits=True means "notify". Disabled (no key, no prompt, or unedited placeholder
     prompt) and any API failure both fail open rather than silently suppressing
     a real listing."""
-    if not openrouter_api_key or not fit_prompt or fit_prompt.startswith("PLACEHOLDER"):
-        return True
+    if not classifier_enabled(openrouter_api_key, fit_prompt):
+        return ClassificationResult(fits=True, reason="classifier disabled")
     try:
         return is_good_fit(openrouter_api_key, classifier_model, fit_prompt, listing)
     except ClassifierError as error:
@@ -45,87 +115,196 @@ def passes_classifier(openrouter_api_key: str | None, classifier_model: str, fit
             f"Classifier failed for {listing.company_name} - {listing.title}, notifying anyway: {error}",
             file=sys.stderr,
         )
-        return True
+        return ClassificationResult(fits=True, reason=f"classifier error, notified anyway: {error}")
 
 
-def fetch_all_listings(sources: list[Source]) -> list[Listing]:
+def fetch_all_listings(sources: list[Source]) -> tuple[list[Listing], list[str]]:
+    """Returns (listings, source names that just crossed the failure-alert threshold)."""
     all_listings: list[Listing] = []
+    newly_unhealthy: list[str] = []
     for source in sources:
         try:
             listings = source.fetch()
         except Exception as error:  # a single broken source must not block the rest
             print(f"Source '{source.name}' failed: {error}", file=sys.stderr)
+            consecutive_failures = record_source_failure(source.name)
+            if consecutive_failures >= SOURCE_FAILURE_ALERT_THRESHOLD and not is_source_alerted(source.name):
+                newly_unhealthy.append(source.name)
+                mark_source_alerted(source.name)
             continue
+        record_source_success(source.name)
         print(f"Source '{source.name}': {len(listings)} matching listing(s)")
         all_listings.extend(listings)
-    return all_listings
+    return all_listings, newly_unhealthy
 
 
-def main() -> int:
-    ntfy_topic = os.environ.get("NTFY_TOPIC")
-    smtp_user = os.environ.get("SMTP_USER")
-    smtp_pass = os.environ.get("SMTP_PASS")
-    if not ntfy_topic or not smtp_user or not smtp_pass:
-        print(
-            "Missing required environment variables: NTFY_TOPIC, SMTP_USER, SMTP_PASS",
-            file=sys.stderr,
-        )
-        return 1
+def alert_admins(unhealthy_sources: list[str], smtp_user: str, smtp_pass: str) -> None:
+    body = (
+        f"These sources have failed {SOURCE_FAILURE_ALERT_THRESHOLD}+ runs in a row: "
+        f"{', '.join(unhealthy_sources)}"
+    )
+    for admin in list_all_users():
+        if not admin.get("is_admin"):
+            continue
+        admin_id = str(admin["user_id"])
+        ntfy_topic = str(admin.get("ntfy_topic", ""))
+        if not ntfy_topic:
+            continue
+        email_recipients = get_email_recipients(load_user_config(admin_id)) or [admin_id]
+        try:
+            notify_message(ntfy_topic, smtp_user, smtp_pass, email_recipients, "job-alerts: source failing", body)
+        except NotificationError as error:
+            print(f"Failed to alert admin {admin_id} about source failures: {error}", file=sys.stderr)
 
-    config = load_config()
+
+def process_user(
+    user: dict[str, object],
+    config: dict[str, object],
+    all_listings: list[Listing],
+    catalog: dict[str, dict[str, object]],
+    smtp_user: str,
+    smtp_pass: str,
+    openrouter_api_key: str | None,
+) -> tuple[int, int, int, bool]:
+    """Returns (new_count, notified_count, rejected_count, had_notification_failure)."""
+    user_id = str(user["user_id"])
+    ntfy_topic = str(user.get("ntfy_topic", ""))
     email_recipients = get_email_recipients(config)
-    if not email_recipients:
-        print("Missing required config: email_to", file=sys.stderr)
-        return 1
+    if not ntfy_topic or not email_recipients:
+        print(f"User {user_id}: missing ntfy_topic or email_to in config, skipping", file=sys.stderr)
+        return 0, 0, 0, False
 
+    user_companies = get_target_companies(config)
+    user_companies_lower = {name.lower() for name in user_companies}
     try:
-        sources = build_sources(get_enabled_source_specs(config), get_target_companies(config))
+        user_sources: list[Source] = build_sources(
+            resolve_source_specs(get_enabled_source_specs(config), user_companies, catalog), user_companies
+        )
     except ValueError as error:
-        print(f"Invalid enabled_sources configuration: {error}", file=sys.stderr)
-        return 1
+        print(f"User {user_id}: invalid enabled_sources configuration: {error}", file=sys.stderr)
+        return 0, 0, 0, False
+    user_sources.extend(build_direct_sources(resolve_direct_pairs(config), catalog))
+    user_source_names = {source.name for source in user_sources}
+
+    user_listings = [
+        listing
+        for listing in all_listings
+        if listing.source in user_source_names
+        and (listing.source != "community" or listing.company_name.strip().lower() in user_companies_lower)
+    ]
+
+    seen_ids = load_seen_ids(user_id)
+    if not seen_ids:
+        print(f"User {user_id}: first run, seeding {len(user_listings)} existing listing(s) without notifying")
+        record_listings(user_id, [(listing, "seeded", "") for listing in user_listings])
+        return 0, 0, 0, False
 
     fit_prompt = str(config.get("fit_prompt", ""))
     classifier_model = str(config.get("classifier_model", ""))
-    openrouter_api_key = os.environ.get("OPENROUTER_API_KEY")
-
-    is_first_run = not seen_file_exists()
-    all_listings = fetch_all_listings(sources)
-    seen_ids = load_seen_ids()
-
-    if is_first_run:
-        all_ids = {listing.unique_id for listing in all_listings}
-        print(f"First run: seeding {len(all_ids)} existing listing(s) without notifying")
-        save_seen_ids(all_ids)
-        return 0
-
-    new_listings = [listing for listing in all_listings if listing.unique_id not in seen_ids]
-    successfully_notified_ids: set[str] = set()
-    rejected_ids: set[str] = set()
+    new_listings = [listing for listing in user_listings if listing.unique_id not in seen_ids]
+    entries: list[tuple[Listing, str, str]] = []
+    notified_count = 0
     had_notification_failure = False
 
+    classifier_active = classifier_enabled(openrouter_api_key, fit_prompt)
+    quota_exceeded = classifier_active and current_month_usage(user_id) >= MONTHLY_CLASSIFIER_CALL_CAP
+    if quota_exceeded and new_listings and not has_notified_quota(user_id):
+        try:
+            notify_message(
+                ntfy_topic,
+                smtp_user,
+                smtp_pass,
+                email_recipients,
+                "job-alerts: monthly quota reached",
+                f"You've hit your {MONTHLY_CLASSIFIER_CALL_CAP} classifier-call limit for this month. "
+                "New listings won't be classified or notified until next month.",
+            )
+        except NotificationError as error:
+            had_notification_failure = True
+            print(f"User {user_id}: failed to send quota-exceeded notice: {error}", file=sys.stderr)
+        mark_quota_notified(user_id)
+
     for listing in new_listings:
-        if not passes_classifier(openrouter_api_key, classifier_model, fit_prompt, listing):
-            rejected_ids.add(listing.unique_id)
-            print(f"Classifier rejected: {listing.company_name} - {listing.title}")
+        if quota_exceeded:
+            entries.append((listing, "rejected", "monthly quota exceeded"))
+            continue
+        if classifier_active:
+            increment_usage(user_id)
+        classification = passes_classifier(openrouter_api_key, classifier_model, fit_prompt, listing)
+        if not classification.fits:
+            entries.append((listing, "rejected", classification.reason))
+            print(f"User {user_id}: classifier rejected: {listing.company_name} - {listing.title} ({classification.reason})")
             continue
         try:
             notify(ntfy_topic, smtp_user, smtp_pass, email_recipients, listing)
         except NotificationError as error:
             had_notification_failure = True
             print(
-                f"Failed to notify for {listing.company_name} - {listing.title}: {error}",
+                f"User {user_id}: failed to notify for {listing.company_name} - {listing.title}: {error}",
                 file=sys.stderr,
             )
             continue
-        successfully_notified_ids.add(listing.unique_id)
-        print(f"Notified: {listing.company_name} - {listing.title}")
+        entries.append((listing, "notified", classification.reason))
+        notified_count += 1
+        print(f"User {user_id}: notified: {listing.company_name} - {listing.title}")
 
-    # Notify-failures stay out of seen_ids so they're retried next run.
-    # Classifier-rejected listings go in so they aren't reclassified (and rebilled) every run.
-    save_seen_ids(seen_ids | successfully_notified_ids | rejected_ids)
+    # Notify-failures aren't recorded so they're retried next run.
+    # Classifier-rejected listings are recorded so they aren't reclassified (and rebilled) every run.
+    record_listings(user_id, entries)
+    rejected_count = sum(1 for _, status, _ in entries if status == "rejected")
+    return len(new_listings), notified_count, rejected_count, had_notification_failure
+
+
+def main() -> int:
+    smtp_user = os.environ.get("SMTP_USER")
+    smtp_pass = os.environ.get("SMTP_PASS")
+    if not smtp_user or not smtp_pass:
+        print("Missing required environment variables: SMTP_USER, SMTP_PASS", file=sys.stderr)
+        return 1
+    openrouter_api_key = os.environ.get("OPENROUTER_API_KEY")
+
+    active_users = list_active_users()
+    if not active_users:
+        print("No active users configured", file=sys.stderr)
+        return 1
+
+    catalog = build_company_catalog()
+    user_configs = {str(user["user_id"]): load_user_config(str(user["user_id"])) for user in active_users}
+    all_source_specs: set[str] = set()
+    all_companies: set[str] = set()
+    all_direct_pairs: set[tuple[str, str]] = set()
+    for config in user_configs.values():
+        companies = get_target_companies(config)
+        all_companies.update(companies)
+        all_source_specs.update(resolve_source_specs(get_enabled_source_specs(config), companies, catalog))
+        all_direct_pairs.update(resolve_direct_pairs(config))
+
+    try:
+        shared_sources: list[Source] = build_sources(sorted(all_source_specs), sorted(all_companies))
+    except ValueError as error:
+        print(f"Invalid enabled_sources configuration across users: {error}", file=sys.stderr)
+        return 1
+    shared_sources.extend(build_direct_sources(all_direct_pairs, catalog))
+
+    all_listings, newly_unhealthy_sources = fetch_all_listings(shared_sources)
+    if newly_unhealthy_sources:
+        alert_admins(newly_unhealthy_sources, smtp_user, smtp_pass)
+
+    total_new = total_notified = total_rejected = 0
+    had_notification_failure = False
+    for user in active_users:
+        user_id = str(user["user_id"])
+        new_count, notified_count, rejected_count, user_had_failure = process_user(
+            user, user_configs[user_id], all_listings, catalog, smtp_user, smtp_pass, openrouter_api_key
+        )
+        total_new += new_count
+        total_notified += notified_count
+        total_rejected += rejected_count
+        had_notification_failure = had_notification_failure or user_had_failure
+
     print(
-        f"Scan complete: {len(new_listings)} new, {len(successfully_notified_ids)} notified, "
-        f"{len(rejected_ids)} rejected by classifier"
+        f"Scan complete: {len(active_users)} user(s), {total_new} new, {total_notified} notified, "
+        f"{total_rejected} rejected by classifier"
     )
     return 1 if had_notification_failure else 0
 
