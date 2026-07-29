@@ -44,7 +44,9 @@
       <a href="/metrics" class="px-3 py-2 rounded-sm text-neutral-600 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-900">Metrics</a>
       <a href="/listings" class="px-3 py-2 rounded-sm text-neutral-600 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-900">Listings</a>
       <a href="/config" class="px-3 py-2 rounded-sm text-neutral-600 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-900">Config</a>
+      <a href="/profile" class="px-3 py-2 rounded-sm text-neutral-600 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-900">Profile</a>
       <a href="/logs" id="logs-nav-link" class="hidden px-3 py-2 rounded-sm text-neutral-600 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-900">Logs</a>
+      <a href="/sources" id="sources-nav-link" class="hidden px-3 py-2 rounded-sm text-neutral-600 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-900">Sources</a>
       <a href="/admin" id="admin-nav-link" class="hidden px-3 py-2 rounded-sm font-medium bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900">Admin</a>
     </nav>
   </aside>
@@ -71,46 +73,7 @@
       <p id="add-user-status" class="mt-2 text-sm text-neutral-500 dark:text-neutral-500"></p>
     </div>
 
-    <div id="users-table" class="border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 mb-10"></div>
-
-    <h2 class="text-xs font-semibold tracking-widest uppercase text-neutral-500 dark:text-neutral-500 mb-6">Companies</h2>
-
-    <div class="border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3 mb-6">
-      <label class="block text-xs font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-500 mb-2">Add a company</label>
-      <div class="grid sm:grid-cols-3 gap-3 mb-3">
-        <input type="text" id="new-company-name" placeholder="Company name"
-          class="rounded-sm border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-neutral-500">
-        <select id="new-company-kind" class="rounded-sm border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm">
-          <option value="community">Community filter only</option>
-          <option value="greenhouse">Greenhouse-backed</option>
-          <option value="ashby">Ashby-backed</option>
-          <option value="direct">Direct scrape (own careers site)</option>
-          <option value="zyte">Zyte-backed (paid, anti-bot bypass)</option>
-        </select>
-        <button id="add-company-btn"
-          class="rounded-sm bg-neutral-900 hover:bg-neutral-700 dark:bg-neutral-100 dark:hover:bg-neutral-300 text-white dark:text-neutral-900 text-sm font-medium px-3 py-1.5">
-          Add
-        </button>
-      </div>
-      <input type="text" id="new-company-token" placeholder="Greenhouse board token"
-        class="hidden w-full mb-3 rounded-sm border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-neutral-500">
-      <input type="text" id="new-company-board-name" placeholder="Ashby board name (from jobs.ashbyhq.com/<board-name>)"
-        class="hidden w-full mb-3 rounded-sm border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-neutral-500">
-      <div id="new-company-direct-fields" class="hidden grid sm:grid-cols-3 gap-3 mb-3">
-        <input type="text" id="new-company-intern-url" placeholder="Intern listings URL"
-          class="rounded-sm border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-neutral-500">
-        <input type="text" id="new-company-newgrad-url" placeholder="New grad listings URL"
-          class="rounded-sm border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-neutral-500">
-        <input type="text" id="new-company-fulltime-url" placeholder="Full-time listings URL"
-          class="rounded-sm border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-neutral-500">
-      </div>
-      <p id="add-company-status" class="mt-2 text-sm text-neutral-500 dark:text-neutral-500"></p>
-    </div>
-
-    <div id="companies-table" class="border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 mb-10"></div>
-
-    <h2 class="text-xs font-semibold tracking-widest uppercase text-neutral-500 dark:text-neutral-500 mb-6">Source health</h2>
-    <div id="source-health-table" class="border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900"></div>
+    <div id="users-table" class="border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900"></div>
   </main>
 </div>
 
@@ -151,9 +114,8 @@ async function showApp() {
   }
   document.getElementById("admin-nav-link").classList.remove("hidden");
   document.getElementById("logs-nav-link").classList.remove("hidden");
+  document.getElementById("sources-nav-link").classList.remove("hidden");
   loadUsers();
-  loadCompanies();
-  loadSourceHealth();
 }
 
 document.getElementById("login-btn").addEventListener("click", async () => {
@@ -191,8 +153,6 @@ document.getElementById("login-btn").addEventListener("click", async () => {
 
 document.getElementById("refresh-btn").addEventListener("click", () => {
   loadUsers();
-  loadCompanies();
-  loadSourceHealth();
 });
 
 document.getElementById("add-user-btn").addEventListener("click", async () => {
@@ -276,150 +236,6 @@ async function loadUsers() {
 async function removeUser(userId) {
   await apiFetch(`/api/admin/users/${encodeURIComponent(userId)}`, { method: "DELETE" });
   loadUsers();
-}
-
-document.getElementById("new-company-kind").addEventListener("change", (event) => {
-  const kind = event.target.value;
-  document.getElementById("new-company-token").classList.toggle("hidden", kind !== "greenhouse");
-  document.getElementById("new-company-board-name").classList.toggle("hidden", kind !== "ashby");
-  document.getElementById("new-company-direct-fields").classList.toggle("hidden", kind !== "direct" && kind !== "zyte");
-});
-
-document.getElementById("add-company-btn").addEventListener("click", async () => {
-  const status = document.getElementById("add-company-status");
-  const nameInput = document.getElementById("new-company-name");
-  const name = nameInput.value.trim();
-  if (!name) return;
-  const sourceKind = document.getElementById("new-company-kind").value;
-  status.textContent = "Adding...";
-  try {
-    await apiFetch("/api/admin/companies", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        company_name: name,
-        source_kind: sourceKind,
-        board_token: document.getElementById("new-company-token").value.trim(),
-        board_name: document.getElementById("new-company-board-name").value.trim(),
-        intern_url: document.getElementById("new-company-intern-url").value.trim(),
-        newgrad_url: document.getElementById("new-company-newgrad-url").value.trim(),
-        fulltime_url: document.getElementById("new-company-fulltime-url").value.trim(),
-      }),
-    });
-    status.textContent = `Added ${name}`;
-    nameInput.value = "";
-    document.getElementById("new-company-token").value = "";
-    document.getElementById("new-company-board-name").value = "";
-    document.getElementById("new-company-intern-url").value = "";
-    document.getElementById("new-company-newgrad-url").value = "";
-    document.getElementById("new-company-fulltime-url").value = "";
-    loadCompanies();
-  } catch (error) {
-    status.textContent = "Failed to add company";
-  }
-});
-
-async function loadCompanies() {
-  const container = document.getElementById("companies-table");
-  renderMessage(container, "Loading…", "text-neutral-500 dark:text-neutral-500");
-  let companies;
-  try {
-    const response = await apiFetch("/api/admin/companies");
-    ({ companies } = await response.json());
-  } catch (error) {
-    renderMessage(container, "Failed to load companies", "text-red-600 dark:text-red-400");
-    return;
-  }
-  if (companies.length === 0) {
-    renderMessage(container, "No companies yet", "text-neutral-500 dark:text-neutral-500");
-    return;
-  }
-  const table = document.createElement("table");
-  table.className = "w-full text-sm";
-  table.innerHTML = `
-    <thead>
-      <tr class="border-b border-neutral-200 dark:border-neutral-800 text-left text-xs uppercase tracking-wide text-neutral-500 dark:text-neutral-500">
-        <th class="px-3 py-2 font-medium">Name</th>
-        <th class="px-3 py-2 font-medium">Kind</th>
-        <th class="px-3 py-2 font-medium">Job types</th>
-        <th class="px-3 py-2 font-medium">Details</th>
-        <th class="px-3 py-2 font-medium"></th>
-      </tr>
-    </thead>
-  `;
-  const tbody = document.createElement("tbody");
-  for (const company of companies) {
-    const row = document.createElement("tr");
-    row.className = "border-b border-neutral-100 dark:border-neutral-900 last:border-0";
-    const jobTypes = ["intern_url", "newgrad_url", "fulltime_url"]
-      .filter((field) => company[field])
-      .map((field) => field.replace("_url", ""))
-      .join(", ");
-    row.innerHTML = `
-      <td class="px-3 py-2">${company.company_name}</td>
-      <td class="px-3 py-2">${company.source_kind}</td>
-      <td class="px-3 py-2 text-neutral-500 dark:text-neutral-500">${jobTypes || "-"}</td>
-      <td class="px-3 py-2 font-mono text-xs text-neutral-500 dark:text-neutral-500">${company.board_token || company.board_name || "-"}</td>
-      <td class="px-3 py-2 text-right"></td>
-    `;
-    const removeBtn = document.createElement("button");
-    removeBtn.textContent = "Remove";
-    removeBtn.className = "text-xs px-2 py-1 rounded-sm border border-red-200 dark:border-red-900 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950";
-    removeBtn.addEventListener("click", async () => {
-      await apiFetch(`/api/admin/companies/${encodeURIComponent(company.company_name)}`, { method: "DELETE" });
-      loadCompanies();
-    });
-    row.lastElementChild.appendChild(removeBtn);
-    tbody.appendChild(row);
-  }
-  table.appendChild(tbody);
-  container.innerHTML = "";
-  container.appendChild(table);
-}
-
-async function loadSourceHealth() {
-  const container = document.getElementById("source-health-table");
-  renderMessage(container, "Loading…", "text-neutral-500 dark:text-neutral-500");
-  let sources;
-  try {
-    const response = await apiFetch("/api/admin/source-health");
-    ({ sources } = await response.json());
-  } catch (error) {
-    renderMessage(container, "Failed to load source health", "text-red-600 dark:text-red-400");
-    return;
-  }
-  if (sources.length === 0) {
-    renderMessage(container, "No source data yet", "text-neutral-500 dark:text-neutral-500");
-    return;
-  }
-  const table = document.createElement("table");
-  table.className = "w-full text-sm";
-  table.innerHTML = `
-    <thead>
-      <tr class="border-b border-neutral-200 dark:border-neutral-800 text-left text-xs uppercase tracking-wide text-neutral-500 dark:text-neutral-500">
-        <th class="px-3 py-2 font-medium">Source</th>
-        <th class="px-3 py-2 font-medium">Last success</th>
-        <th class="px-3 py-2 font-medium">Last failure</th>
-        <th class="px-3 py-2 font-medium">Consecutive failures</th>
-      </tr>
-    </thead>
-  `;
-  const tbody = document.createElement("tbody");
-  for (const source of sources) {
-    const row = document.createElement("tr");
-    row.className = "border-b border-neutral-100 dark:border-neutral-900 last:border-0";
-    const unhealthy = (source.consecutive_failures || 0) > 0;
-    row.innerHTML = `
-      <td class="px-3 py-2">${source.source_name}</td>
-      <td class="px-3 py-2 font-mono text-xs text-neutral-500 dark:text-neutral-500">${source.last_success_at ? new Date(source.last_success_at * 1000).toISOString().replace(/\.\d{3}Z$/, "Z") : "-"}</td>
-      <td class="px-3 py-2 font-mono text-xs text-neutral-500 dark:text-neutral-500">${source.last_failure_at ? new Date(source.last_failure_at * 1000).toISOString().replace(/\.\d{3}Z$/, "Z") : "-"}</td>
-      <td class="px-3 py-2 ${unhealthy ? "text-red-600 dark:text-red-400" : ""}">${source.consecutive_failures || 0}</td>
-    `;
-    tbody.appendChild(row);
-  }
-  table.appendChild(tbody);
-  container.innerHTML = "";
-  container.appendChild(table);
 }
 
 if (token()) {

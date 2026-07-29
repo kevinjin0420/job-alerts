@@ -44,7 +44,9 @@
       <a href="/metrics" class="px-3 py-2 rounded-sm text-neutral-600 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-900">Metrics</a>
       <a href="/listings" class="px-3 py-2 rounded-sm text-neutral-600 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-900">Listings</a>
       <a href="/config" class="px-3 py-2 rounded-sm text-neutral-600 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-900">Config</a>
+      <a href="/profile" class="px-3 py-2 rounded-sm text-neutral-600 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-900">Profile</a>
       <a href="/logs" id="logs-nav-link" class="px-3 py-2 rounded-sm font-medium bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900">Logs</a>
+      <a href="/sources" id="sources-nav-link" class="hidden px-3 py-2 rounded-sm text-neutral-600 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-900">Sources</a>
       <a href="/admin" id="admin-nav-link" class="hidden px-3 py-2 rounded-sm text-neutral-600 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-900">Admin</a>
     </nav>
   </aside>
@@ -110,6 +112,7 @@ async function showApp() {
   }
   document.getElementById("admin-nav-link").classList.remove("hidden");
   document.getElementById("logs-nav-link").classList.remove("hidden");
+  document.getElementById("sources-nav-link").classList.remove("hidden");
   loadLogs();
 }
 

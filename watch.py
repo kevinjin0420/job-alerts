@@ -22,6 +22,7 @@ from users import (
     list_companies,
     load_seen_ids,
     load_user_config,
+    load_user_profile,
     mark_quota_notified,
     mark_source_alerted,
     record_listings,
@@ -138,7 +139,11 @@ def classifier_enabled(openrouter_api_key: str | None, fit_prompt: str) -> bool:
 
 
 def passes_classifier(
-    openrouter_api_key: str | None, classifier_model: str, fit_prompt: str, listing: Listing
+    openrouter_api_key: str | None,
+    classifier_model: str,
+    fit_prompt: str,
+    listing: Listing,
+    resume_text: str | None = None,
 ) -> ClassificationResult:
     """fits=True means "notify". Disabled (no key, no prompt, or unedited placeholder
     prompt) and any API failure both fail open rather than silently suppressing
@@ -146,7 +151,7 @@ def passes_classifier(
     if not classifier_enabled(openrouter_api_key, fit_prompt):
         return ClassificationResult(fits=True, reason="classifier disabled")
     try:
-        return is_good_fit(openrouter_api_key, classifier_model, fit_prompt, listing)
+        return is_good_fit(openrouter_api_key, classifier_model, fit_prompt, listing, resume_text)
     except ClassifierError as error:
         print(
             f"Classifier failed for {listing.company_name} - {listing.title}, notifying anyway: {error}",
@@ -233,13 +238,14 @@ def process_user(
     seen_ids = load_seen_ids(user_id)
     if not seen_ids:
         print(f"User {user_id}: first run, seeding {len(user_listings)} existing listing(s) without notifying")
-        record_listings(user_id, [(listing, "seeded", "") for listing in user_listings])
+        record_listings(user_id, [(listing, "seeded", "", None) for listing in user_listings])
         return 0, 0, 0, False
 
     fit_prompt = str(config.get("fit_prompt", ""))
     classifier_model = str(config.get("classifier_model", ""))
+    resume_text = str(load_user_profile(user_id).get("resume_text", "")) or None
     new_listings = [listing for listing in user_listings if listing.unique_id not in seen_ids]
-    entries: list[tuple[Listing, str, str]] = []
+    entries: list[tuple[Listing, str, str, int | None]] = []
     notified_count = 0
     had_notification_failure = False
 
@@ -263,13 +269,13 @@ def process_user(
 
     for listing in new_listings:
         if quota_exceeded:
-            entries.append((listing, "rejected", "monthly quota exceeded"))
+            entries.append((listing, "rejected", "monthly quota exceeded", None))
             continue
         if classifier_active:
             increment_usage(user_id)
-        classification = passes_classifier(openrouter_api_key, classifier_model, fit_prompt, listing)
+        classification = passes_classifier(openrouter_api_key, classifier_model, fit_prompt, listing, resume_text)
         if not classification.fits:
-            entries.append((listing, "rejected", classification.reason))
+            entries.append((listing, "rejected", classification.reason, classification.fit_score))
             print(f"User {user_id}: classifier rejected: {listing.company_name} - {listing.title} ({classification.reason})")
             continue
         try:
@@ -281,14 +287,14 @@ def process_user(
                 file=sys.stderr,
             )
             continue
-        entries.append((listing, "notified", classification.reason))
+        entries.append((listing, "notified", classification.reason, classification.fit_score))
         notified_count += 1
         print(f"User {user_id}: notified: {listing.company_name} - {listing.title}")
 
     # Notify-failures aren't recorded so they're retried next run.
     # Classifier-rejected listings are recorded so they aren't reclassified (and rebilled) every run.
     record_listings(user_id, entries)
-    rejected_count = sum(1 for _, status, _ in entries if status == "rejected")
+    rejected_count = sum(1 for _, status, _, _ in entries if status == "rejected")
     return len(new_listings), notified_count, rejected_count, had_notification_failure
 
 

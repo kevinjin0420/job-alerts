@@ -16,6 +16,7 @@ SEEN_LISTINGS_TABLE = "job-alerts-seen-listings"
 USAGE_TABLE = "job-alerts-usage"
 COMPANIES_TABLE = "job-alerts-companies"
 SOURCE_HEALTH_TABLE = "job-alerts-source-health"
+USER_PROFILE_TABLE = "job-alerts-user-profile"
 
 _dynamodb = boto3.client("dynamodb")
 _deserializer = TypeDeserializer()
@@ -71,24 +72,26 @@ def load_seen_ids(user_id: str) -> set[str]:
         kwargs["ExclusiveStartKey"] = response["LastEvaluatedKey"]
 
 
-def record_listings(user_id: str, entries: list[tuple[Listing, str, str]]) -> None:
-    """entries are (listing, status, reason). status is 'notified', 'rejected', or 'seeded'."""
+def record_listings(user_id: str, entries: list[tuple[Listing, str, str, int | None]]) -> None:
+    """entries are (listing, status, reason, fit_score). status is 'notified',
+    'rejected', or 'seeded'. fit_score is None unless the user has a resume
+    uploaded (see classifier.is_good_fit)."""
     now = int(time.time())
-    for listing, status, reason in entries:
-        _dynamodb.put_item(
-            TableName=SEEN_LISTINGS_TABLE,
-            Item={
-                "user_id": {"S": user_id},
-                "listing_id": {"S": listing.unique_id},
-                "seen_at": {"N": str(now)},
-                "status": {"S": status},
-                "reason": {"S": reason},
-                "company_name": {"S": listing.company_name},
-                "title": {"S": listing.title},
-                "url": {"S": listing.url},
-                "source": {"S": listing.source},
-            },
-        )
+    for listing, status, reason, fit_score in entries:
+        item: dict[str, Any] = {
+            "user_id": {"S": user_id},
+            "listing_id": {"S": listing.unique_id},
+            "seen_at": {"N": str(now)},
+            "status": {"S": status},
+            "reason": {"S": reason},
+            "company_name": {"S": listing.company_name},
+            "title": {"S": listing.title},
+            "url": {"S": listing.url},
+            "source": {"S": listing.source},
+        }
+        if fit_score is not None:
+            item["fit_score"] = {"N": str(fit_score)}
+        _dynamodb.put_item(TableName=SEEN_LISTINGS_TABLE, Item=item)
 
 
 def list_seen_listings(user_id: str, limit: int = 300) -> list[dict[str, Any]]:
@@ -166,6 +169,7 @@ def create_user(user_id: str, *, is_admin: bool, ntfy_topic: str) -> None:
 def delete_user(user_id: str) -> None:
     _dynamodb.delete_item(TableName=USERS_TABLE, Key={"user_id": {"S": user_id}})
     _dynamodb.delete_item(TableName=USER_CONFIG_TABLE, Key={"user_id": {"S": user_id}})
+    _dynamodb.delete_item(TableName=USER_PROFILE_TABLE, Key={"user_id": {"S": user_id}})
 
     for listing_id in load_seen_ids(user_id):
         _dynamodb.delete_item(
@@ -343,3 +347,27 @@ def mark_source_alerted(source_name: str) -> None:
 def list_source_health() -> list[dict[str, Any]]:
     response = _dynamodb.scan(TableName=SOURCE_HEALTH_TABLE)
     return [_unwrap_item(item) for item in response.get("Items", [])]
+
+
+def load_user_profile(user_id: str) -> dict[str, Any]:
+    response = _dynamodb.get_item(TableName=USER_PROFILE_TABLE, Key={"user_id": {"S": user_id}})
+    item = response.get("Item")
+    return _unwrap_item(item) if item else {}
+
+
+def save_user_profile(
+    user_id: str, *, resume_text: str, resume_filename: str, resume_url: str | None = None
+) -> None:
+    item: dict[str, Any] = {
+        "user_id": user_id,
+        "resume_text": resume_text,
+        "resume_filename": resume_filename,
+        "resume_uploaded_at": int(time.time()),
+    }
+    if resume_url:
+        item["resume_url"] = resume_url
+    _dynamodb.put_item(TableName=USER_PROFILE_TABLE, Item=_wrap_item(item))
+
+
+def delete_user_resume(user_id: str) -> None:
+    _dynamodb.delete_item(TableName=USER_PROFILE_TABLE, Key={"user_id": {"S": user_id}})

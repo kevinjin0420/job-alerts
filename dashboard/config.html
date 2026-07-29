@@ -44,7 +44,9 @@
       <a href="/metrics" class="px-3 py-2 rounded-sm text-neutral-600 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-900">Metrics</a>
       <a href="/listings" class="px-3 py-2 rounded-sm text-neutral-600 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-900">Listings</a>
       <a href="/config" class="px-3 py-2 rounded-sm font-medium bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900">Config</a>
+      <a href="/profile" class="px-3 py-2 rounded-sm text-neutral-600 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-900">Profile</a>
       <a href="/logs" id="logs-nav-link" class="hidden px-3 py-2 rounded-sm text-neutral-600 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-900">Logs</a>
+      <a href="/sources" id="sources-nav-link" class="hidden px-3 py-2 rounded-sm text-neutral-600 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-900">Sources</a>
       <a href="/admin" id="admin-nav-link" class="hidden px-3 py-2 rounded-sm text-neutral-600 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-900">Admin</a>
     </nav>
   </aside>
@@ -117,21 +119,6 @@
             class="rounded-sm border border-neutral-200 dark:border-neutral-700 divide-y divide-neutral-200 dark:divide-neutral-800"></div>
         </div>
 
-        <div class="border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3">
-          <label class="block text-xs font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-500 mb-2">Email recipients</label>
-          <input type="text" id="email-to" placeholder="you@example.com"
-            class="w-full rounded-sm border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-neutral-500">
-        </div>
-
-        <div class="border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3">
-          <label class="block text-xs font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-500 mb-2">Agent API key</label>
-          <p class="text-sm text-neutral-500 dark:text-neutral-500 mb-3">For letting your own agent read/update this config on your behalf. See <code>docs/agent-skill.md</code>. Shown once - generating a new one invalidates the old.</p>
-          <div id="api-key-display" class="hidden mb-3 rounded-sm border border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 px-3 py-2 text-sm font-mono break-all"></div>
-          <button id="generate-api-key-btn"
-            class="rounded-sm border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-900 text-sm font-medium px-3 py-1.5">
-            Generate new API key
-          </button>
-        </div>
       </div>
     </div>
   </main>
@@ -169,6 +156,7 @@ async function setupNav() {
     const me = await response.json();
     document.getElementById("admin-nav-link").classList.toggle("hidden", !me.is_admin);
     document.getElementById("logs-nav-link").classList.toggle("hidden", !me.is_admin);
+    document.getElementById("sources-nav-link").classList.toggle("hidden", !me.is_admin);
   } catch (error) {
     // apiFetch already shows the gate on 401
   }
@@ -212,14 +200,6 @@ document.getElementById("login-btn").addEventListener("click", async () => {
   }
   localStorage.setItem(TOKEN_STORAGE, data.access_token);
   showApp();
-});
-
-document.getElementById("generate-api-key-btn").addEventListener("click", async () => {
-  const response = await apiFetch("/api/apikey", { method: "POST" });
-  const data = await response.json();
-  const display = document.getElementById("api-key-display");
-  display.textContent = data.api_key;
-  display.classList.remove("hidden");
 });
 
 document.getElementById("run-tuner-btn").addEventListener("click", async () => {
@@ -310,7 +290,6 @@ async function loadConfig() {
     const options = await optionsResponse.json();
     document.getElementById("fit-prompt").value = config.fit_prompt || "";
     document.getElementById("classifier-model").value = config.classifier_model || "";
-    document.getElementById("email-to").value = (config.email_to || []).join(", ");
     renderCheckboxes(document.getElementById("company-checkboxes"), options.companies, config.companies || [], "company");
     renderCheckboxes(document.getElementById("source-checkboxes"), options.sources, config.enabled_sources || [], "source");
     renderCheckboxes(document.getElementById("job-type-checkboxes"), options.job_types, config.job_types || ["intern"], "jobtype");
@@ -329,7 +308,6 @@ document.getElementById("save-config-btn").addEventListener("click", async () =>
     companies: checkedValues(document.getElementById("company-checkboxes")),
     enabled_sources: checkedValues(document.getElementById("source-checkboxes")),
     job_types: checkedValues(document.getElementById("job-type-checkboxes")),
-    email_to: document.getElementById("email-to").value.split(",").map((item) => item.trim()).filter(Boolean),
   };
   try {
     await apiFetch("/api/config", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });

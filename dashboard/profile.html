@@ -1,0 +1,339 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>job-alerts dashboard - profile</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>tailwind.config = { darkMode: "media" };</script>
+<style>
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background-color: rgb(212 212 212); border-radius: 9999px; border: 2px solid transparent; background-clip: content-box; }
+  html { scrollbar-color: rgb(212 212 212) transparent; scrollbar-width: thin; }
+  @media (prefers-color-scheme: dark) {
+    ::-webkit-scrollbar-thumb { background-color: rgb(64 64 64); }
+    html { scrollbar-color: rgb(64 64 64) transparent; }
+  }
+</style>
+</head>
+<body class="bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100 min-h-screen">
+
+<div id="gate" class="min-h-screen flex items-center justify-center p-6">
+  <div class="w-full max-w-sm rounded-sm border border-neutral-300 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-6">
+    <h1 class="text-sm font-semibold tracking-wide uppercase text-center">job-alerts</h1>
+    <p class="mt-1 text-sm text-neutral-500 dark:text-neutral-500 text-center">Sign in to continue</p>
+    <div id="login-error" class="mt-3 text-sm hidden"></div>
+    <input type="email" id="email-input" placeholder="Email"
+      class="mt-4 w-full rounded-sm border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-neutral-500">
+    <input type="password" id="password-input" placeholder="Password"
+      class="mt-3 w-full rounded-sm border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-neutral-500">
+    <input type="password" id="new-password-input" placeholder="New password"
+      class="hidden mt-3 w-full rounded-sm border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-neutral-500">
+    <button id="login-btn"
+      class="mt-3 w-full rounded-sm bg-neutral-900 hover:bg-neutral-700 dark:bg-neutral-100 dark:hover:bg-neutral-300 text-white dark:text-neutral-900 text-sm font-medium px-3 py-1.5">
+      Sign in
+    </button>
+  </div>
+</div>
+
+<div id="app" class="hidden flex min-h-screen">
+  <aside class="w-52 shrink-0 border-r border-neutral-200 dark:border-neutral-800 p-3">
+    <div class="text-xs font-semibold tracking-widest uppercase mb-8">job-alerts</div>
+    <nav class="flex flex-col gap-1 text-sm">
+      <a href="/metrics" class="px-3 py-2 rounded-sm text-neutral-600 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-900">Metrics</a>
+      <a href="/listings" class="px-3 py-2 rounded-sm text-neutral-600 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-900">Listings</a>
+      <a href="/config" class="px-3 py-2 rounded-sm text-neutral-600 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-900">Config</a>
+      <a href="/profile" class="px-3 py-2 rounded-sm font-medium bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900">Profile</a>
+      <a href="/logs" id="logs-nav-link" class="hidden px-3 py-2 rounded-sm text-neutral-600 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-900">Logs</a>
+      <a href="/sources" id="sources-nav-link" class="hidden px-3 py-2 rounded-sm text-neutral-600 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-900">Sources</a>
+      <a href="/admin" id="admin-nav-link" class="hidden px-3 py-2 rounded-sm text-neutral-600 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-900">Admin</a>
+    </nav>
+  </aside>
+
+  <main class="flex-1 p-6">
+    <div class="flex items-center justify-between mb-6">
+      <h2 class="text-xs font-semibold tracking-widest uppercase text-neutral-500 dark:text-neutral-500">Profile</h2>
+      <span id="email-status" class="text-sm text-neutral-500 dark:text-neutral-500"></span>
+    </div>
+
+    <div class="grid lg:grid-cols-2 gap-6 items-start">
+      <div class="space-y-6">
+        <div class="border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3">
+          <label class="block text-xs font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-500 mb-2">Email recipients</label>
+          <div class="flex gap-3">
+            <input type="text" id="email-to" placeholder="you@example.com"
+              class="flex-1 rounded-sm border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-neutral-500">
+            <button id="save-email-btn"
+              class="rounded-sm bg-neutral-900 hover:bg-neutral-700 dark:bg-neutral-100 dark:hover:bg-neutral-300 text-white dark:text-neutral-900 text-sm font-medium px-3 py-1.5">
+              Save
+            </button>
+          </div>
+        </div>
+
+        <div class="border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3">
+          <label class="block text-xs font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-500 mb-2">Agent API key</label>
+          <p class="text-sm text-neutral-500 dark:text-neutral-500 mb-3">For letting your own agent read/update this config on your behalf. See <code>docs/agent-skill.md</code>. Shown once - generating a new one invalidates the old.</p>
+          <div id="api-key-display" class="hidden mb-3 rounded-sm border border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 px-3 py-2 text-sm font-mono break-all"></div>
+          <button id="generate-api-key-btn"
+            class="rounded-sm border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-900 text-sm font-medium px-3 py-1.5">
+            Generate new API key
+          </button>
+        </div>
+      </div>
+
+      <div class="space-y-6">
+        <div class="border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3">
+          <label class="block text-xs font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-500 mb-2">Resume</label>
+          <p class="text-sm text-neutral-500 dark:text-neutral-500 mb-3">Uploaded once, factored into every job-fit check as an additional 0-100 fit score - it doesn't change whether you get notified, just adds a score you can see on the Listings page.</p>
+          <div id="resume-status" class="text-sm text-neutral-500 dark:text-neutral-500 mb-3">Loading…</div>
+          <input type="file" id="resume-file" accept="application/pdf"
+            class="w-full mb-3 text-sm file:mr-3 file:rounded-sm file:border-0 file:bg-neutral-900 file:text-white dark:file:bg-neutral-100 dark:file:text-neutral-900 file:text-sm file:font-medium file:px-3 file:py-1.5">
+          <div class="flex gap-3">
+            <button id="upload-resume-btn"
+              class="rounded-sm bg-neutral-900 hover:bg-neutral-700 dark:bg-neutral-100 dark:hover:bg-neutral-300 text-white dark:text-neutral-900 text-sm font-medium px-3 py-1.5">
+              Upload
+            </button>
+            <button id="remove-resume-btn"
+              class="hidden text-xs px-3 py-1.5 rounded-sm border border-red-200 dark:border-red-900 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950">
+              Remove resume
+            </button>
+          </div>
+          <div class="mt-4 pt-4 border-t border-neutral-200 dark:border-neutral-800">
+            <label class="block text-xs font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-500 mb-2">Or fetch from a URL</label>
+            <div class="flex gap-3">
+              <input type="url" id="resume-url" placeholder="https://example.com/resume.pdf"
+                class="flex-1 rounded-sm border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-neutral-500">
+              <button id="fetch-resume-url-btn"
+                class="rounded-sm border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-900 text-sm font-medium px-3 py-1.5">
+                Fetch
+              </button>
+            </div>
+          </div>
+          <details id="resume-preview" class="hidden mt-3">
+            <summary class="text-sm text-neutral-500 dark:text-neutral-500 cursor-pointer">View extracted text</summary>
+            <pre id="resume-text" class="mt-2 max-h-64 overflow-y-auto whitespace-pre-wrap rounded-sm border border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 px-3 py-2 text-xs"></pre>
+          </details>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script>
+const TOKEN_STORAGE = "job-alerts-access-token";
+let pendingSession = null;
+
+function token() {
+  return localStorage.getItem(TOKEN_STORAGE) || "";
+}
+
+async function apiFetch(path, options = {}) {
+  const response = await fetch(path, {
+    ...options,
+    headers: { ...(options.headers || {}), "Authorization": `Bearer ${token()}` },
+  });
+  if (response.status === 401) {
+    localStorage.removeItem(TOKEN_STORAGE);
+    showGate();
+    throw new Error("unauthorized");
+  }
+  return response;
+}
+
+function showGate() {
+  document.getElementById("gate").classList.remove("hidden");
+  document.getElementById("app").classList.add("hidden");
+}
+
+async function setupNav() {
+  try {
+    const response = await apiFetch("/api/me");
+    const me = await response.json();
+    document.getElementById("admin-nav-link").classList.toggle("hidden", !me.is_admin);
+    document.getElementById("logs-nav-link").classList.toggle("hidden", !me.is_admin);
+    document.getElementById("sources-nav-link").classList.toggle("hidden", !me.is_admin);
+  } catch (error) {
+    // apiFetch already shows the gate on 401
+  }
+}
+
+async function showApp() {
+  document.getElementById("gate").classList.add("hidden");
+  document.getElementById("app").classList.remove("hidden");
+  await setupNav();
+  loadEmailConfig();
+  loadProfile();
+}
+
+document.getElementById("login-btn").addEventListener("click", async () => {
+  const errorEl = document.getElementById("login-error");
+  errorEl.classList.add("hidden");
+  const email = document.getElementById("email-input").value.trim();
+
+  const body = pendingSession
+    ? { email, new_password: document.getElementById("new-password-input").value, session: pendingSession }
+    : { email, password: document.getElementById("password-input").value };
+
+  const response = await fetch("/api/login", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data = await response.json();
+
+  if (!response.ok) {
+    errorEl.textContent = data.error || "Login failed";
+    errorEl.className = "mt-3 text-sm text-red-600 dark:text-red-400";
+    return;
+  }
+  if (data.challenge === "NEW_PASSWORD_REQUIRED") {
+    pendingSession = data.session;
+    document.getElementById("password-input").classList.add("hidden");
+    document.getElementById("new-password-input").classList.remove("hidden");
+    errorEl.textContent = "First login - please set a new password";
+    errorEl.className = "mt-3 text-sm text-neutral-600 dark:text-neutral-400";
+    return;
+  }
+  localStorage.setItem(TOKEN_STORAGE, data.access_token);
+  showApp();
+});
+
+document.getElementById("generate-api-key-btn").addEventListener("click", async () => {
+  const response = await apiFetch("/api/apikey", { method: "POST" });
+  const data = await response.json();
+  const display = document.getElementById("api-key-display");
+  display.textContent = data.api_key;
+  display.classList.remove("hidden");
+});
+
+async function loadEmailConfig() {
+  const response = await apiFetch("/api/config");
+  const config = await response.json();
+  document.getElementById("email-to").value = (config.email_to || []).join(", ");
+}
+
+document.getElementById("save-email-btn").addEventListener("click", async () => {
+  const status = document.getElementById("email-status");
+  status.textContent = "Saving...";
+  const email_to = document.getElementById("email-to").value.split(",").map((item) => item.trim()).filter(Boolean);
+  try {
+    await apiFetch("/api/config", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email_to }),
+    });
+    status.textContent = "Saved";
+  } catch (error) {
+    status.textContent = "Failed to save";
+  }
+  setTimeout(() => { status.textContent = ""; }, 3000);
+});
+
+function renderProfile(profile) {
+  const status = document.getElementById("resume-status");
+  const removeBtn = document.getElementById("remove-resume-btn");
+  const preview = document.getElementById("resume-preview");
+  if (!profile.resume_filename) {
+    status.textContent = "No resume uploaded yet";
+    removeBtn.classList.add("hidden");
+    preview.classList.add("hidden");
+    document.getElementById("resume-url").value = "";
+    return;
+  }
+  const uploaded = profile.resume_uploaded_at
+    ? new Date(profile.resume_uploaded_at * 1000).toLocaleString()
+    : "unknown time";
+  status.textContent = `${profile.resume_filename} - uploaded ${uploaded}`;
+  removeBtn.classList.remove("hidden");
+  document.getElementById("resume-text").textContent = profile.resume_text || "";
+  preview.classList.remove("hidden");
+  document.getElementById("resume-url").value = profile.resume_url || "";
+}
+
+async function loadProfile() {
+  try {
+    const response = await apiFetch("/api/profile");
+    renderProfile(await response.json());
+  } catch (error) {
+    document.getElementById("resume-status").textContent = "Failed to load resume status";
+  }
+}
+
+function readFileAsBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result.split(",").pop());
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+document.getElementById("upload-resume-btn").addEventListener("click", async () => {
+  const status = document.getElementById("resume-status");
+  const input = document.getElementById("resume-file");
+  const file = input.files[0];
+  if (!file) {
+    status.textContent = "Choose a PDF first";
+    return;
+  }
+  status.textContent = "Uploading…";
+  try {
+    const content_base64 = await readFileAsBase64(file);
+    const response = await apiFetch("/api/profile/resume", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ filename: file.name, content_base64 }),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      status.textContent = data.error || "Upload failed";
+      return;
+    }
+    input.value = "";
+    renderProfile(data);
+  } catch (error) {
+    status.textContent = "Upload failed";
+  }
+});
+
+document.getElementById("fetch-resume-url-btn").addEventListener("click", async () => {
+  const status = document.getElementById("resume-status");
+  const urlInput = document.getElementById("resume-url");
+  const url = urlInput.value.trim();
+  if (!url) {
+    status.textContent = "Enter a URL first";
+    return;
+  }
+  status.textContent = "Fetching…";
+  try {
+    const response = await apiFetch("/api/profile/resume-url", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ url }),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      status.textContent = data.error || "Fetch failed";
+      return;
+    }
+    renderProfile(data);
+  } catch (error) {
+    status.textContent = "Fetch failed";
+  }
+});
+
+document.getElementById("remove-resume-btn").addEventListener("click", async () => {
+  await apiFetch("/api/profile/resume", { method: "DELETE" });
+  loadProfile();
+});
+
+if (token()) {
+  showApp();
+} else {
+  showGate();
+}
+</script>
+
+</body>
+</html>

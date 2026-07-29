@@ -58,9 +58,13 @@ STAGE_DIR="$(mktemp -d)"
 ZIP_PATH="$(mktemp -u /tmp/job-alerts-dashboard-XXXXXX).zip"
 trap 'rm -rf "${STAGE_DIR}" "${ZIP_PATH}"' EXIT
 cp "${REPO_ROOT}/dashboard/app.py" "${STAGE_DIR}/"
-cp "${REPO_ROOT}/dashboard/metrics.html" "${REPO_ROOT}/dashboard/config.html" "${REPO_ROOT}/dashboard/logs.html" "${REPO_ROOT}/dashboard/admin.html" "${REPO_ROOT}/dashboard/listings.html" "${STAGE_DIR}/"
+cp "${REPO_ROOT}/dashboard/metrics.html" "${REPO_ROOT}/dashboard/config.html" "${REPO_ROOT}/dashboard/logs.html" \
+  "${REPO_ROOT}/dashboard/admin.html" "${REPO_ROOT}/dashboard/listings.html" "${REPO_ROOT}/dashboard/sources.html" \
+  "${REPO_ROOT}/dashboard/profile.html" "${STAGE_DIR}/"
 cp "${REPO_ROOT}/config.py" "${REPO_ROOT}/users.py" "${REPO_ROOT}/classifier.py" "${STAGE_DIR}/"
 cp -r "${REPO_ROOT}/sources" "${STAGE_DIR}/sources"
+echo "==> Installing dependencies"
+pip install --target "${STAGE_DIR}" pypdf --quiet
 (cd "${STAGE_DIR}" && zip -qr "${ZIP_PATH}" .)
 
 echo "==> Writing Lambda environment config"

@@ -44,7 +44,9 @@
       <a href="/metrics" class="px-3 py-2 rounded-sm text-neutral-600 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-900">Metrics</a>
       <a href="/listings" class="px-3 py-2 rounded-sm font-medium bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900">Listings</a>
       <a href="/config" class="px-3 py-2 rounded-sm text-neutral-600 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-900">Config</a>
+      <a href="/profile" class="px-3 py-2 rounded-sm text-neutral-600 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-900">Profile</a>
       <a href="/logs" id="logs-nav-link" class="hidden px-3 py-2 rounded-sm text-neutral-600 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-900">Logs</a>
+      <a href="/sources" id="sources-nav-link" class="hidden px-3 py-2 rounded-sm text-neutral-600 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-900">Sources</a>
       <a href="/admin" id="admin-nav-link" class="hidden px-3 py-2 rounded-sm text-neutral-600 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-900">Admin</a>
     </nav>
   </aside>
@@ -107,6 +109,7 @@ async function setupNav() {
     const me = await response.json();
     document.getElementById("admin-nav-link").classList.toggle("hidden", !me.is_admin);
     document.getElementById("logs-nav-link").classList.toggle("hidden", !me.is_admin);
+    document.getElementById("sources-nav-link").classList.toggle("hidden", !me.is_admin);
   } catch (error) {
     // apiFetch already shows the gate on 401
   }
@@ -184,6 +187,7 @@ function renderListings() {
         <th class="px-3 py-2 font-medium">Title</th>
         <th class="px-3 py-2 font-medium">Status</th>
         <th class="px-3 py-2 font-medium">Reason</th>
+        <th class="px-3 py-2 font-medium">Fit score</th>
         <th class="px-3 py-2 font-medium">Seen</th>
         <th class="px-3 py-2 font-medium"></th>
       </tr>
@@ -200,6 +204,7 @@ function renderListings() {
       <td class="px-3 py-2">${titleCell}</td>
       <td class="px-3 py-2 ${STATUS_STYLES[item.status] || ""}">${item.status || "legacy"}</td>
       <td class="px-3 py-2 text-neutral-500 dark:text-neutral-500">${item.reason || "-"}</td>
+      <td class="px-3 py-2 font-mono text-xs text-neutral-500 dark:text-neutral-500">${item.fit_score ?? "-"}</td>
       <td class="px-3 py-2 font-mono text-xs text-neutral-500 dark:text-neutral-500">${item.seen_at ? isoTime(item.seen_at) : "-"}</td>
       <td class="px-3 py-2 text-right"></td>
     `;

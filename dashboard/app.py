@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import base64
+import io
 import json
 import os
 import secrets
 import time
+import urllib.error
+import urllib.parse
+import urllib.request
 from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -11,6 +16,7 @@ from typing import Any
 
 import boto3
 from botocore.exceptions import ClientError
+from pypdf import PdfReader
 
 from classifier import ClassifierError, is_good_fit
 from config import SUPPORTED_JOB_TYPES, SUPPORTED_SOURCE_KINDS
@@ -20,6 +26,7 @@ from users import (
     current_month_usage,
     delete_company,
     delete_user,
+    delete_user_resume,
     find_user_by_api_key,
     generate_api_key,
     get_user,
@@ -29,9 +36,11 @@ from users import (
     list_seen_listings,
     list_source_health,
     load_user_config,
+    load_user_profile,
     retry_listing,
     save_company,
     save_user_config,
+    save_user_profile,
 )
 
 WATCH_LOG_GROUP = "/aws/lambda/job-alerts-watch"
@@ -55,9 +64,16 @@ PAGES = {
     "/config": (Path(__file__).parent / "config.html").read_text(),
     "/logs": (Path(__file__).parent / "logs.html").read_text(),
     "/admin": (Path(__file__).parent / "admin.html").read_text(),
+    "/sources": (Path(__file__).parent / "sources.html").read_text(),
+    "/profile": (Path(__file__).parent / "profile.html").read_text(),
 }
 
 FAILURE_MARKERS = ("fail", "Fail", "FAIL", "Error", "ERROR", "Traceback")
+MAX_RESUME_UPLOAD_BYTES = 5 * 1024 * 1024
+RESUME_TEXT_CHAR_CAP = 6000
+# ponytail: resume_text gets resent on every single per-listing classifier
+# call, so it's capped here (once, at upload time) rather than left unbounded -
+# protects downstream token cost regardless of how long the source PDF is.
 
 
 def handler(event: dict[str, Any], _context: object) -> dict[str, Any]:
@@ -93,7 +109,12 @@ def handler(event: dict[str, Any], _context: object) -> dict[str, Any]:
     if method == "GET" and path == "/api/config":
         return _json_response(200, load_user_config(user_id))
     if method == "PUT" and path == "/api/config":
-        save_user_config(user_id, json.loads(event.get("body") or "{}"))
+        # Merge onto the current item rather than overwriting it outright -
+        # config.html and profile.html (email_to) both PUT here with only the
+        # fields they own; a blind overwrite from either would wipe the other's.
+        current_config = load_user_config(user_id)
+        current_config.update(json.loads(event.get("body") or "{}"))
+        save_user_config(user_id, current_config)
         return _json_response(200, {"status": "saved"})
     if method == "GET" and path == "/api/logs":
         if not is_admin:
@@ -110,6 +131,15 @@ def handler(event: dict[str, Any], _context: object) -> dict[str, Any]:
         return _json_response(200, {"status": "removed"})
     if method == "POST" and path == "/api/test-classifier":
         return _handle_test_classifier(user_id, json.loads(event.get("body") or "{}"))
+    if method == "GET" and path == "/api/profile":
+        return _json_response(200, load_user_profile(user_id))
+    if method == "POST" and path == "/api/profile/resume":
+        return _handle_resume_upload(user_id, json.loads(event.get("body") or "{}"))
+    if method == "POST" and path == "/api/profile/resume-url":
+        return _handle_resume_url_fetch(user_id, json.loads(event.get("body") or "{}"))
+    if method == "DELETE" and path == "/api/profile/resume":
+        delete_user_resume(user_id)
+        return _json_response(200, {"status": "deleted"})
 
     if path.startswith("/api/admin/"):
         if not is_admin:
@@ -135,12 +165,71 @@ def _handle_test_classifier(user_id: str, body: dict[str, Any]) -> dict[str, Any
         url="",
         description=str(body.get("description", "")) or None,
     )
+    resume_text = str(load_user_profile(user_id).get("resume_text", "")) or None
     increment_usage(user_id)
     try:
-        result = is_good_fit(OPENROUTER_API_KEY, classifier_model, fit_prompt, sample)
+        result = is_good_fit(OPENROUTER_API_KEY, classifier_model, fit_prompt, sample, resume_text)
     except ClassifierError as error:
         return _json_response(502, {"error": str(error)})
-    return _json_response(200, {"fits": result.fits, "reason": result.reason})
+    return _json_response(200, {"fits": result.fits, "reason": result.reason, "fit_score": result.fit_score})
+
+
+def _extract_resume_text(pdf_bytes: bytes) -> str:
+    """Raises ValueError with a user-facing message on any failure."""
+    if len(pdf_bytes) > MAX_RESUME_UPLOAD_BYTES:
+        raise ValueError("resume must be under 5MB")
+    try:
+        reader = PdfReader(io.BytesIO(pdf_bytes))
+        resume_text = "\n".join(page.extract_text() or "" for page in reader.pages).strip()
+    except Exception as error:
+        raise ValueError("could not parse PDF") from error
+    if not resume_text:
+        raise ValueError("no extractable text found in PDF")
+    return resume_text[:RESUME_TEXT_CHAR_CAP]
+
+
+def _handle_resume_upload(user_id: str, body: dict[str, Any]) -> dict[str, Any]:
+    filename = str(body.get("filename", "resume.pdf")).strip() or "resume.pdf"
+    content_base64 = str(body.get("content_base64", ""))
+    if not content_base64:
+        return _json_response(400, {"error": "content_base64 required"})
+    try:
+        pdf_bytes = base64.b64decode(content_base64, validate=True)
+    except (ValueError, TypeError):
+        return _json_response(400, {"error": "content_base64 is not valid base64"})
+
+    try:
+        resume_text = _extract_resume_text(pdf_bytes)
+    except ValueError as error:
+        return _json_response(400, {"error": str(error)})
+
+    save_user_profile(user_id, resume_text=resume_text, resume_filename=filename)
+    return _json_response(200, load_user_profile(user_id))
+
+
+def _handle_resume_url_fetch(user_id: str, body: dict[str, Any]) -> dict[str, Any]:
+    url = str(body.get("url", "")).strip()
+    parsed_url = urllib.parse.urlparse(url)
+    if parsed_url.scheme not in ("http", "https") or not parsed_url.netloc:
+        return _json_response(400, {"error": "a valid http(s) url is required"})
+
+    request = urllib.request.Request(url, headers={"User-Agent": "job-alerts-dashboard"})
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            # Read one byte past the cap so an oversized file is still rejected
+            # by _extract_resume_text's own check rather than silently truncated.
+            pdf_bytes = response.read(MAX_RESUME_UPLOAD_BYTES + 1)
+    except (urllib.error.URLError, TimeoutError) as error:
+        return _json_response(400, {"error": f"could not fetch url: {error}"})
+
+    try:
+        resume_text = _extract_resume_text(pdf_bytes)
+    except ValueError as error:
+        return _json_response(400, {"error": str(error)})
+
+    filename = parsed_url.path.rsplit("/", 1)[-1] or "resume.pdf"
+    save_user_profile(user_id, resume_text=resume_text, resume_filename=filename, resume_url=url)
+    return _json_response(200, load_user_profile(user_id))
 
 
 def _authenticate(headers: dict[str, str]) -> dict[str, Any] | None:
