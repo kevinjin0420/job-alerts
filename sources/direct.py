@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import re
 
-from .base import Listing, fetch_url
+from .base import Listing, fetch_url, looks_like_job_posting_url
 
 JINA_READER_URL = "https://r.jina.ai/"
 REQUEST_TIMEOUT_SECONDS = 30
-MARKDOWN_LINK_PATTERN = re.compile(r"\[([^\]]{4,})\]\((https?://[^\s\)]+)\)")
+MARKDOWN_LINK_PATTERN = re.compile(r"(?<!!)\[([^\]]{4,})\]\((https?://[^\s\)]+)\)")
 MIN_TITLE_LENGTH = 4
 
 
@@ -16,11 +16,12 @@ class DirectSource:
     which renders JS and returns clean markdown - covers sites we can't
     parse with a plain HTTP GET, without needing our own headless browser.
 
-    ponytail: "every markdown link with title-like text is a candidate
-    posting" - a generic heuristic, not a real per-site parser. Expect some
-    nav/footer noise; the classifier downstream filters non-matches out.
-    Upgrade to a site-specific parser if this heuristic misses real listings
-    or produces too much noise once tested against real target companies.
+    ponytail: "every markdown link with title-like text and a numeric job id
+    in its URL is a candidate posting" - a generic heuristic, not a real
+    per-site parser. Filters most nav/footer noise via looks_like_job_posting_url;
+    the classifier downstream still filters whatever slips through. Upgrade to
+    a site-specific parser if this heuristic misses real listings or produces
+    too much noise once tested against real target companies.
     """
 
     def __init__(self, company_name: str, url: str, job_type: str) -> None:
@@ -40,7 +41,7 @@ class DirectSource:
         seen_urls: set[str] = set()
         for title, link in MARKDOWN_LINK_PATTERN.findall(markdown):
             title = title.strip()
-            if len(title) < MIN_TITLE_LENGTH or link in seen_urls:
+            if len(title) < MIN_TITLE_LENGTH or link in seen_urls or not looks_like_job_posting_url(link):
                 continue
             seen_urls.add(link)
             matches.append(

@@ -17,7 +17,7 @@ invalidates the old one).
 ## Endpoints
 
 `GET /api/config` - your current config: `fit_prompt`, `classifier_model`,
-`companies`, `enabled_sources`, `email_to`.
+`companies`, `job_types`, `email_to`.
 
 `PUT /api/config` - same shape as GET. Replaces your whole config - send
 the complete object, not a partial patch.

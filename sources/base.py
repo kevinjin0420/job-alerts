@@ -1,9 +1,21 @@
 from __future__ import annotations
 
+import re
 import time
 import urllib.request
 from dataclasses import dataclass
 from typing import Protocol
+
+_JOB_ID_PATTERN = re.compile(r"/\d{4,}/?(?:[?#].*)?$")
+
+
+def looks_like_job_posting_url(url: str) -> bool:
+    """Heuristic for direct/zyte scrapers: real ATS postings almost always end in
+    a numeric job id (e.g. /positions/7732569/), while nav/footer/social links don't.
+    ponytail: imperfect (a few non-job pages coincidentally end in a number too),
+    the classifier downstream still filters whatever slips through this.
+    """
+    return bool(_JOB_ID_PATTERN.search(url))
 
 
 @dataclass(frozen=True)

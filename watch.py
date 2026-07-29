@@ -7,12 +7,14 @@ import time
 
 from classifier import ClassificationResult, ClassifierError, is_good_fit
 from notifiers import NotificationError, notify, notify_message
+from resume import ResumeFetchError, fetch_resume_text_from_url
 from sources import Listing, Source, build_sources
 from sources.ashby import AshbySource
 from sources.direct import DirectSource
 from sources.zyte import ZyteSource
 from users import (
     current_month_usage,
+    get_classifier_model,
     get_source_last_success,
     has_notified_quota,
     increment_usage,
@@ -30,7 +32,6 @@ from users import (
     record_source_success,
 )
 
-DEFAULT_ENABLED_SOURCES = ["community"]
 DEFAULT_JOB_TYPES = ["intern"]
 MONTHLY_CLASSIFIER_CALL_CAP = 300
 SOURCE_FAILURE_ALERT_THRESHOLD = 3
@@ -59,10 +60,6 @@ def get_email_recipients(config: dict[str, object]) -> list[str]:
     return _string_list(config, "email_to")
 
 
-def get_enabled_source_specs(config: dict[str, object]) -> list[str]:
-    return _string_list(config, "enabled_sources") or DEFAULT_ENABLED_SOURCES
-
-
 def get_job_types(config: dict[str, object]) -> list[str]:
     return _string_list(config, "job_types") or DEFAULT_JOB_TYPES
 
@@ -74,15 +71,18 @@ def build_company_catalog() -> dict[str, dict[str, object]]:
 FLAT_CATALOG_KINDS = {"apple", "google"}
 
 
-def resolve_source_specs(
-    base_specs: list[str], companies: list[str], catalog: dict[str, dict[str, object]]
-) -> list[str]:
+def resolve_source_specs(companies: list[str], catalog: dict[str, dict[str, object]]) -> list[str]:
     """Auto-adds a source for each selected company the admin catalog maps to
     one - a greenhouse board token, or a dedicated scraper like apple/google -
     so users just pick companies, no hand-typed spec strings. Apple/Google
     aren't parameterized by job_type (their scrapers take no arguments), so
-    they're resolved here rather than through build_job_type_sources."""
-    specs = list(base_specs)
+    they're resolved here rather than through build_job_type_sources.
+
+    "community" is always included - it's a free, per-user-filtered shared
+    aggregator, not something a user has any real reason to turn off, so
+    there's no config knob for it (see resolve_source_specs's old
+    base_specs/enabled_sources parameter, removed)."""
+    specs = ["community"]
     for company in companies:
         entry = catalog.get(company.strip().lower())
         if not entry:
@@ -199,6 +199,22 @@ def alert_admins(unhealthy_sources: list[str], smtp_user: str, smtp_pass: str) -
             print(f"Failed to alert admin {admin_id} about source failures: {error}", file=sys.stderr)
 
 
+def _resolve_resume_text(user_id: str) -> str | None:
+    """URL mode is fetched live once per user per scan (that's the whole
+    point - the user updates the file at that URL directly, no re-sync needed
+    here). A dead/unreachable URL shouldn't fail the user's whole scan, just
+    means no fit_score this run."""
+    profile = load_user_profile(user_id)
+    resume_url = str(profile.get("resume_url", ""))
+    if resume_url:
+        try:
+            return fetch_resume_text_from_url(resume_url)
+        except ResumeFetchError as error:
+            print(f"User {user_id}: could not fetch resume from URL, continuing without fit_score: {error}", file=sys.stderr)
+            return None
+    return str(profile.get("resume_text", "")) or None
+
+
 def process_user(
     user: dict[str, object],
     config: dict[str, object],
@@ -207,8 +223,9 @@ def process_user(
     smtp_user: str,
     smtp_pass: str,
     openrouter_api_key: str | None,
+    classifier_model: str,
 ) -> tuple[int, int, int, bool]:
-    """Returns (new_count, notified_count, rejected_count, had_notification_failure)."""
+    """Returns (new_count, notified_count, dismissed_count, had_notification_failure)."""
     user_id = str(user["user_id"])
     ntfy_topic = str(user.get("ntfy_topic", ""))
     email_recipients = get_email_recipients(config)
@@ -219,11 +236,9 @@ def process_user(
     user_companies = get_target_companies(config)
     user_companies_lower = {name.lower() for name in user_companies}
     try:
-        user_sources: list[Source] = build_sources(
-            resolve_source_specs(get_enabled_source_specs(config), user_companies, catalog), user_companies
-        )
+        user_sources: list[Source] = build_sources(resolve_source_specs(user_companies, catalog), user_companies)
     except ValueError as error:
-        print(f"User {user_id}: invalid enabled_sources configuration: {error}", file=sys.stderr)
+        print(f"User {user_id}: invalid source configuration: {error}", file=sys.stderr)
         return 0, 0, 0, False
     user_sources.extend(build_job_type_sources(resolve_job_type_pairs(config), catalog))
     user_source_names = {source.name for source in user_sources}
@@ -242,11 +257,10 @@ def process_user(
         return 0, 0, 0, False
 
     fit_prompt = str(config.get("fit_prompt", ""))
-    classifier_model = str(config.get("classifier_model", ""))
-    resume_text = str(load_user_profile(user_id).get("resume_text", "")) or None
+    resume_text = _resolve_resume_text(user_id)
     new_listings = [listing for listing in user_listings if listing.unique_id not in seen_ids]
-    entries: list[tuple[Listing, str, str, int | None]] = []
     notified_count = 0
+    dismissed_count = 0
     had_notification_failure = False
 
     classifier_active = classifier_enabled(openrouter_api_key, fit_prompt)
@@ -269,14 +283,20 @@ def process_user(
 
     for listing in new_listings:
         if quota_exceeded:
-            entries.append((listing, "rejected", "monthly quota exceeded", None))
+            record_listings(user_id, [(listing, "dismissed", "monthly quota exceeded", None)])
+            dismissed_count += 1
             continue
         if classifier_active:
             increment_usage(user_id)
         classification = passes_classifier(openrouter_api_key, classifier_model, fit_prompt, listing, resume_text)
+        if not classification.is_job_posting:
+            record_listings(user_id, [(listing, "invalid", classification.reason, classification.fit_score)])
+            print(f"User {user_id}: not a job posting: {listing.company_name} - {listing.title} ({classification.reason})")
+            continue
         if not classification.fits:
-            entries.append((listing, "rejected", classification.reason, classification.fit_score))
-            print(f"User {user_id}: classifier rejected: {listing.company_name} - {listing.title} ({classification.reason})")
+            record_listings(user_id, [(listing, "dismissed", classification.reason, classification.fit_score)])
+            dismissed_count += 1
+            print(f"User {user_id}: classifier dismissed: {listing.company_name} - {listing.title} ({classification.reason})")
             continue
         try:
             notify(ntfy_topic, smtp_user, smtp_pass, email_recipients, listing)
@@ -286,16 +306,13 @@ def process_user(
                 f"User {user_id}: failed to notify for {listing.company_name} - {listing.title}: {error}",
                 file=sys.stderr,
             )
+            # Not recorded - retried next run, since the notification itself never went out.
             continue
-        entries.append((listing, "notified", classification.reason, classification.fit_score))
+        record_listings(user_id, [(listing, "notified", classification.reason, classification.fit_score)])
         notified_count += 1
         print(f"User {user_id}: notified: {listing.company_name} - {listing.title}")
 
-    # Notify-failures aren't recorded so they're retried next run.
-    # Classifier-rejected listings are recorded so they aren't reclassified (and rebilled) every run.
-    record_listings(user_id, entries)
-    rejected_count = sum(1 for _, status, _, _ in entries if status == "rejected")
-    return len(new_listings), notified_count, rejected_count, had_notification_failure
+    return len(new_listings), notified_count, dismissed_count, had_notification_failure
 
 
 def main() -> int:
@@ -305,6 +322,7 @@ def main() -> int:
         print("Missing required environment variables: SMTP_USER, SMTP_PASS", file=sys.stderr)
         return 1
     openrouter_api_key = os.environ.get("OPENROUTER_API_KEY")
+    classifier_model = get_classifier_model()
 
     active_users = list_active_users()
     if not active_users:
@@ -319,13 +337,13 @@ def main() -> int:
     for config in user_configs.values():
         companies = get_target_companies(config)
         all_companies.update(companies)
-        all_source_specs.update(resolve_source_specs(get_enabled_source_specs(config), companies, catalog))
+        all_source_specs.update(resolve_source_specs(companies, catalog))
         all_job_type_pairs.update(resolve_job_type_pairs(config))
 
     try:
         shared_sources: list[Source] = build_sources(sorted(all_source_specs), sorted(all_companies))
     except ValueError as error:
-        print(f"Invalid enabled_sources configuration across users: {error}", file=sys.stderr)
+        print(f"Invalid source configuration across users: {error}", file=sys.stderr)
         return 1
     shared_sources.extend(build_job_type_sources(all_job_type_pairs, catalog))
 
@@ -333,21 +351,22 @@ def main() -> int:
     if newly_unhealthy_sources:
         alert_admins(newly_unhealthy_sources, smtp_user, smtp_pass)
 
-    total_new = total_notified = total_rejected = 0
+    total_new = total_notified = total_dismissed = 0
     had_notification_failure = False
     for user in active_users:
         user_id = str(user["user_id"])
-        new_count, notified_count, rejected_count, user_had_failure = process_user(
-            user, user_configs[user_id], all_listings, catalog, smtp_user, smtp_pass, openrouter_api_key
+        new_count, notified_count, dismissed_count, user_had_failure = process_user(
+            user, user_configs[user_id], all_listings, catalog, smtp_user, smtp_pass, openrouter_api_key,
+            classifier_model,
         )
         total_new += new_count
         total_notified += notified_count
-        total_rejected += rejected_count
+        total_dismissed += dismissed_count
         had_notification_failure = had_notification_failure or user_had_failure
 
     print(
         f"Scan complete: {len(active_users)} user(s), {total_new} new, {total_notified} notified, "
-        f"{total_rejected} rejected by classifier"
+        f"{total_dismissed} dismissed by classifier"
     )
     return 1 if had_notification_failure else 0
 

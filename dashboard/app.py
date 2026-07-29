@@ -1,14 +1,11 @@
 from __future__ import annotations
 
 import base64
-import io
 import json
 import os
 import secrets
 import time
-import urllib.error
 import urllib.parse
-import urllib.request
 from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -16,10 +13,10 @@ from typing import Any
 
 import boto3
 from botocore.exceptions import ClientError
-from pypdf import PdfReader
 
 from classifier import ClassifierError, is_good_fit
-from config import SUPPORTED_JOB_TYPES, SUPPORTED_SOURCE_KINDS
+from config import SUPPORTED_JOB_TYPES
+from resume import ResumeFetchError, extract_resume_text, fetch_resume_text_from_url
 from sources.base import Listing
 from users import (
     create_user,
@@ -29,6 +26,7 @@ from users import (
     delete_user_resume,
     find_user_by_api_key,
     generate_api_key,
+    get_classifier_model,
     get_user,
     increment_usage,
     list_all_users,
@@ -38,7 +36,9 @@ from users import (
     load_user_config,
     load_user_profile,
     retry_listing,
+    save_classifier_model,
     save_company,
+    save_ntfy_topic,
     save_user_config,
     save_user_profile,
 )
@@ -57,23 +57,47 @@ logs_client = boto3.client("logs")
 cloudwatch_client = boto3.client("cloudwatch")
 dynamodb_client = boto3.client("dynamodb")
 cognito_client = boto3.client("cognito-idp")
+lambda_client = boto3.client("lambda")
 
+_SIDEBAR_TEMPLATE = (Path(__file__).parent / "sidebar.html").read_text()
+_DEFAULT_NAV_CLASS = "px-3 py-2 rounded-none text-neutral-600 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-900"
+_ACTIVE_NAV_CLASS = "px-3 py-2 rounded-none font-medium bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900"
+
+
+def _render_sidebar(active_path: str) -> str:
+    html = _SIDEBAR_TEMPLATE
+    # The admin-only links (Logs/Sources/Admin) also carry a "hidden" prefix -
+    # they start hidden regardless of which page is active and are revealed
+    # client-side once /api/me confirms admin, so both variants need handling.
+    for default_class, active_class in (
+        (_DEFAULT_NAV_CLASS, _ACTIVE_NAV_CLASS),
+        (f"hidden {_DEFAULT_NAV_CLASS}", f"hidden {_ACTIVE_NAV_CLASS}"),
+    ):
+        html = html.replace(
+            f'data-nav="{active_path}" class="{default_class}"',
+            f'data-nav="{active_path}" class="{active_class}"',
+        )
+    return html
+
+
+# Each page's __SIDEBAR__ placeholder is substituted once here, at cold start -
+# same "compute once, serve free" pattern as the rest of PAGES, so splitting
+# the sidebar out doesn't add any per-request cost.
 PAGES = {
-    "/metrics": (Path(__file__).parent / "metrics.html").read_text(),
-    "/listings": (Path(__file__).parent / "listings.html").read_text(),
-    "/config": (Path(__file__).parent / "config.html").read_text(),
-    "/logs": (Path(__file__).parent / "logs.html").read_text(),
-    "/admin": (Path(__file__).parent / "admin.html").read_text(),
-    "/sources": (Path(__file__).parent / "sources.html").read_text(),
-    "/profile": (Path(__file__).parent / "profile.html").read_text(),
+    path: (Path(__file__).parent / filename).read_text().replace("__SIDEBAR__", _render_sidebar(path))
+    for path, filename in {
+        "/metrics": "metrics.html",
+        "/listings": "listings.html",
+        "/config": "config.html",
+        "/logs": "logs.html",
+        "/admin": "admin.html",
+        "/sources": "sources.html",
+        "/profile": "profile.html",
+    }.items()
 }
+SHARED_JS = (Path(__file__).parent / "shared.js").read_text()
 
 FAILURE_MARKERS = ("fail", "Fail", "FAIL", "Error", "ERROR", "Traceback")
-MAX_RESUME_UPLOAD_BYTES = 5 * 1024 * 1024
-RESUME_TEXT_CHAR_CAP = 6000
-# ponytail: resume_text gets resent on every single per-listing classifier
-# call, so it's capped here (once, at upload time) rather than left unbounded -
-# protects downstream token cost regardless of how long the source PDF is.
 
 
 def handler(event: dict[str, Any], _context: object) -> dict[str, Any]:
@@ -82,6 +106,8 @@ def handler(event: dict[str, Any], _context: object) -> dict[str, Any]:
 
     if method == "GET" and path == "/":
         return _redirect("/metrics")
+    if method == "GET" and path == "/shared.js":
+        return _response(200, "application/javascript", SHARED_JS)
     if method == "GET" and path in PAGES:
         return _response(200, "text/html", PAGES[path])
 
@@ -100,11 +126,20 @@ def handler(event: dict[str, Any], _context: object) -> dict[str, Any]:
     is_admin = bool(user.get("is_admin", False))
 
     if method == "GET" and path == "/api/me":
-        return _json_response(200, {"user_id": user_id, "is_admin": is_admin})
+        return _json_response(
+            200, {"user_id": user_id, "is_admin": is_admin, "ntfy_topic": str(user.get("ntfy_topic", ""))}
+        )
+    if method == "PUT" and path == "/api/me":
+        body = json.loads(event.get("body") or "{}")
+        ntfy_topic = str(body.get("ntfy_topic", "")).strip()
+        if not ntfy_topic:
+            return _json_response(400, {"error": "ntfy_topic is required"})
+        save_ntfy_topic(user_id, ntfy_topic)
+        return _json_response(200, {"status": "saved"})
     if method == "GET" and path == "/api/options":
         company_names = [str(entry["company_name"]) for entry in list_companies()]
         return _json_response(
-            200, {"companies": company_names, "sources": SUPPORTED_SOURCE_KINDS, "job_types": SUPPORTED_JOB_TYPES}
+            200, {"companies": company_names, "job_types": SUPPORTED_JOB_TYPES}
         )
     if method == "GET" and path == "/api/config":
         return _json_response(200, load_user_config(user_id))
@@ -125,14 +160,15 @@ def handler(event: dict[str, Any], _context: object) -> dict[str, Any]:
     if method == "POST" and path == "/api/apikey":
         return _json_response(200, {"api_key": generate_api_key(user_id)})
     if method == "GET" and path == "/api/listings":
-        return _json_response(200, {"listings": list_seen_listings(user_id)})
+        listings = [item for item in list_seen_listings(user_id) if item.get("status") != "invalid"]
+        return _json_response(200, {"listings": listings})
     if method == "DELETE" and path.startswith("/api/listings/"):
         retry_listing(user_id, path[len("/api/listings/") :])
         return _json_response(200, {"status": "removed"})
     if method == "POST" and path == "/api/test-classifier":
         return _handle_test_classifier(user_id, json.loads(event.get("body") or "{}"))
     if method == "GET" and path == "/api/profile":
-        return _json_response(200, load_user_profile(user_id))
+        return _json_response(200, _profile_with_live_preview(user_id))
     if method == "POST" and path == "/api/profile/resume":
         return _handle_resume_upload(user_id, json.loads(event.get("body") or "{}"))
     if method == "POST" and path == "/api/profile/resume-url":
@@ -153,9 +189,9 @@ def _handle_test_classifier(user_id: str, body: dict[str, Any]) -> dict[str, Any
     if not OPENROUTER_API_KEY:
         return _json_response(400, {"error": "classifier not configured (no OPENROUTER_API_KEY)"})
     fit_prompt = str(body.get("fit_prompt", ""))
-    classifier_model = str(body.get("classifier_model", ""))
-    if not fit_prompt or not classifier_model:
-        return _json_response(400, {"error": "fit_prompt and classifier_model are required"})
+    if not fit_prompt:
+        return _json_response(400, {"error": "fit_prompt is required"})
+    classifier_model = get_classifier_model()
     sample = Listing(
         source="test",
         id="test",
@@ -165,7 +201,7 @@ def _handle_test_classifier(user_id: str, body: dict[str, Any]) -> dict[str, Any
         url="",
         description=str(body.get("description", "")) or None,
     )
-    resume_text = str(load_user_profile(user_id).get("resume_text", "")) or None
+    resume_text = _resolve_resume_text(load_user_profile(user_id))
     increment_usage(user_id)
     try:
         result = is_good_fit(OPENROUTER_API_KEY, classifier_model, fit_prompt, sample, resume_text)
@@ -174,18 +210,28 @@ def _handle_test_classifier(user_id: str, body: dict[str, Any]) -> dict[str, Any
     return _json_response(200, {"fits": result.fits, "reason": result.reason, "fit_score": result.fit_score})
 
 
-def _extract_resume_text(pdf_bytes: bytes) -> str:
-    """Raises ValueError with a user-facing message on any failure."""
-    if len(pdf_bytes) > MAX_RESUME_UPLOAD_BYTES:
-        raise ValueError("resume must be under 5MB")
-    try:
-        reader = PdfReader(io.BytesIO(pdf_bytes))
-        resume_text = "\n".join(page.extract_text() or "" for page in reader.pages).strip()
-    except Exception as error:
-        raise ValueError("could not parse PDF") from error
-    if not resume_text:
-        raise ValueError("no extractable text found in PDF")
-    return resume_text[:RESUME_TEXT_CHAR_CAP]
+def _resolve_resume_text(profile: dict[str, Any]) -> str | None:
+    """URL mode is fetched live every time (that's the point - no re-syncing
+    the app when the file at that URL changes); upload mode uses the cached
+    text from upload time, since there's no live source to refetch from."""
+    resume_url = str(profile.get("resume_url", ""))
+    if resume_url:
+        try:
+            return fetch_resume_text_from_url(resume_url)
+        except ResumeFetchError:
+            return None
+    return str(profile.get("resume_text", "")) or None
+
+
+def _profile_with_live_preview(user_id: str) -> dict[str, Any]:
+    profile = load_user_profile(user_id)
+    resume_url = str(profile.get("resume_url", ""))
+    if resume_url:
+        try:
+            profile["resume_text"] = fetch_resume_text_from_url(resume_url)
+        except ResumeFetchError as error:
+            profile["resume_fetch_error"] = str(error)
+    return profile
 
 
 def _handle_resume_upload(user_id: str, body: dict[str, Any]) -> dict[str, Any]:
@@ -199,8 +245,8 @@ def _handle_resume_upload(user_id: str, body: dict[str, Any]) -> dict[str, Any]:
         return _json_response(400, {"error": "content_base64 is not valid base64"})
 
     try:
-        resume_text = _extract_resume_text(pdf_bytes)
-    except ValueError as error:
+        resume_text = extract_resume_text(pdf_bytes)
+    except ResumeFetchError as error:
         return _json_response(400, {"error": str(error)})
 
     save_user_profile(user_id, resume_text=resume_text, resume_filename=filename)
@@ -213,23 +259,19 @@ def _handle_resume_url_fetch(user_id: str, body: dict[str, Any]) -> dict[str, An
     if parsed_url.scheme not in ("http", "https") or not parsed_url.netloc:
         return _json_response(400, {"error": "a valid http(s) url is required"})
 
-    request = urllib.request.Request(url, headers={"User-Agent": "job-alerts-dashboard"})
+    # Fetched here only to validate the URL actually works and to return an
+    # immediate preview - the result is never persisted, since the whole
+    # point of URL mode is fetching fresh every time it's actually needed.
     try:
-        with urllib.request.urlopen(request, timeout=15) as response:
-            # Read one byte past the cap so an oversized file is still rejected
-            # by _extract_resume_text's own check rather than silently truncated.
-            pdf_bytes = response.read(MAX_RESUME_UPLOAD_BYTES + 1)
-    except (urllib.error.URLError, TimeoutError) as error:
-        return _json_response(400, {"error": f"could not fetch url: {error}"})
-
-    try:
-        resume_text = _extract_resume_text(pdf_bytes)
-    except ValueError as error:
+        resume_text = fetch_resume_text_from_url(url)
+    except ResumeFetchError as error:
         return _json_response(400, {"error": str(error)})
 
     filename = parsed_url.path.rsplit("/", 1)[-1] or "resume.pdf"
-    save_user_profile(user_id, resume_text=resume_text, resume_filename=filename, resume_url=url)
-    return _json_response(200, load_user_profile(user_id))
+    save_user_profile(user_id, resume_filename=filename, resume_url=url)
+    profile = load_user_profile(user_id)
+    profile["resume_text"] = resume_text
+    return _json_response(200, profile)
 
 
 def _authenticate(headers: dict[str, str]) -> dict[str, Any] | None:
@@ -346,6 +388,21 @@ def _handle_admin(method: str, path: str, event: dict[str, Any], admin_user_id: 
 
     if method == "GET" and path == "/api/admin/source-health":
         return _json_response(200, {"sources": list_source_health()})
+
+    if method == "GET" and path == "/api/admin/settings":
+        return _json_response(200, {"classifier_model": get_classifier_model()})
+
+    if method == "PUT" and path == "/api/admin/settings":
+        body = json.loads(event.get("body") or "{}")
+        classifier_model = str(body.get("classifier_model", "")).strip()
+        if not classifier_model:
+            return _json_response(400, {"error": "classifier_model is required"})
+        save_classifier_model(classifier_model)
+        return _json_response(200, {"status": "saved"})
+
+    if method == "POST" and path == "/api/admin/trigger-scan":
+        lambda_client.invoke(FunctionName=WATCH_FUNCTION_NAME, InvocationType="Event")
+        return _json_response(200, {"status": "triggered"})
 
     return _json_response(404, {"error": "not found"})
 

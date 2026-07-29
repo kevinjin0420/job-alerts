@@ -4,8 +4,15 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>job-alerts dashboard - profile</title>
+<script>
+  (function() {
+    var stored = localStorage.getItem("job-alerts-theme");
+    var isDark = stored ? stored === "dark" : window.matchMedia("(prefers-color-scheme: dark)").matches;
+    document.documentElement.classList.toggle("dark", isDark);
+  })();
+</script>
 <script src="https://cdn.tailwindcss.com"></script>
-<script>tailwind.config = { darkMode: "media" };</script>
+<script>tailwind.config = { darkMode: "class" };</script>
 <style>
   ::-webkit-scrollbar { width: 10px; height: 10px; }
   ::-webkit-scrollbar-track { background: transparent; }
@@ -20,36 +27,25 @@
 <body class="bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100 min-h-screen">
 
 <div id="gate" class="min-h-screen flex items-center justify-center p-6">
-  <div class="w-full max-w-sm rounded-sm border border-neutral-300 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-6">
+  <div class="w-full max-w-sm rounded-none border border-neutral-300 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-6">
     <h1 class="text-sm font-semibold tracking-wide uppercase text-center">job-alerts</h1>
     <p class="mt-1 text-sm text-neutral-500 dark:text-neutral-500 text-center">Sign in to continue</p>
     <div id="login-error" class="mt-3 text-sm hidden"></div>
     <input type="email" id="email-input" placeholder="Email"
-      class="mt-4 w-full rounded-sm border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-neutral-500">
+      class="mt-4 w-full rounded-none border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-neutral-500">
     <input type="password" id="password-input" placeholder="Password"
-      class="mt-3 w-full rounded-sm border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-neutral-500">
+      class="mt-3 w-full rounded-none border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-neutral-500">
     <input type="password" id="new-password-input" placeholder="New password"
-      class="hidden mt-3 w-full rounded-sm border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-neutral-500">
+      class="hidden mt-3 w-full rounded-none border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-neutral-500">
     <button id="login-btn"
-      class="mt-3 w-full rounded-sm bg-neutral-900 hover:bg-neutral-700 dark:bg-neutral-100 dark:hover:bg-neutral-300 text-white dark:text-neutral-900 text-sm font-medium px-3 py-1.5">
+      class="mt-3 w-full rounded-none bg-neutral-900 hover:opacity-50 dark:bg-neutral-100 text-white dark:text-neutral-900 text-sm font-medium px-3 py-1.5">
       Sign in
     </button>
   </div>
 </div>
 
 <div id="app" class="hidden flex min-h-screen">
-  <aside class="w-52 shrink-0 border-r border-neutral-200 dark:border-neutral-800 p-3">
-    <div class="text-xs font-semibold tracking-widest uppercase mb-8">job-alerts</div>
-    <nav class="flex flex-col gap-1 text-sm">
-      <a href="/metrics" class="px-3 py-2 rounded-sm text-neutral-600 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-900">Metrics</a>
-      <a href="/listings" class="px-3 py-2 rounded-sm text-neutral-600 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-900">Listings</a>
-      <a href="/config" class="px-3 py-2 rounded-sm text-neutral-600 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-900">Config</a>
-      <a href="/profile" class="px-3 py-2 rounded-sm font-medium bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900">Profile</a>
-      <a href="/logs" id="logs-nav-link" class="hidden px-3 py-2 rounded-sm text-neutral-600 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-900">Logs</a>
-      <a href="/sources" id="sources-nav-link" class="hidden px-3 py-2 rounded-sm text-neutral-600 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-900">Sources</a>
-      <a href="/admin" id="admin-nav-link" class="hidden px-3 py-2 rounded-sm text-neutral-600 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-900">Admin</a>
-    </nav>
-  </aside>
+__SIDEBAR__
 
   <main class="flex-1 p-6">
     <div class="flex items-center justify-between mb-6">
@@ -63,20 +59,34 @@
           <label class="block text-xs font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-500 mb-2">Email recipients</label>
           <div class="flex gap-3">
             <input type="text" id="email-to" placeholder="you@example.com"
-              class="flex-1 rounded-sm border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-neutral-500">
+              class="flex-1 rounded-none border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-neutral-500">
             <button id="save-email-btn"
-              class="rounded-sm bg-neutral-900 hover:bg-neutral-700 dark:bg-neutral-100 dark:hover:bg-neutral-300 text-white dark:text-neutral-900 text-sm font-medium px-3 py-1.5">
+              class="rounded-none bg-neutral-900 hover:opacity-50 dark:bg-neutral-100 text-white dark:text-neutral-900 text-sm font-medium px-3 py-1.5">
               Save
             </button>
           </div>
         </div>
 
         <div class="border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3">
+          <label class="block text-xs font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-500 mb-2">Notification channel</label>
+          <p class="text-sm text-neutral-500 dark:text-neutral-500 mb-3">Your <a href="https://ntfy.sh" target="_blank" rel="noopener" class="underline hover:opacity-50">ntfy</a> topic. Treat it like a secret - regenerate if leaked.</p>
+          <div class="flex gap-3">
+            <input type="text" id="ntfy-topic" placeholder="job-alerts-xxxxxxxxxxxx"
+              class="flex-1 rounded-none border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-neutral-500">
+            <button id="save-ntfy-topic-btn"
+              class="rounded-none bg-neutral-900 hover:opacity-50 dark:bg-neutral-100 text-white dark:text-neutral-900 text-sm font-medium px-3 py-1.5">
+              Save
+            </button>
+          </div>
+          <p id="ntfy-topic-status" class="mt-2 text-sm text-neutral-500 dark:text-neutral-500"></p>
+        </div>
+
+        <div class="border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3">
           <label class="block text-xs font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-500 mb-2">Agent API key</label>
-          <p class="text-sm text-neutral-500 dark:text-neutral-500 mb-3">For letting your own agent read/update this config on your behalf. See <code>docs/agent-skill.md</code>. Shown once - generating a new one invalidates the old.</p>
-          <div id="api-key-display" class="hidden mb-3 rounded-sm border border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 px-3 py-2 text-sm font-mono break-all"></div>
+          <p class="text-sm text-neutral-500 dark:text-neutral-500 mb-3">For your own agent to read/update this config. See <code>docs/agent-skill.md</code>. Shown once.</p>
+          <div id="api-key-display" class="hidden mb-3 rounded-none border border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 px-3 py-2 text-sm font-mono break-all"></div>
           <button id="generate-api-key-btn"
-            class="rounded-sm border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-900 text-sm font-medium px-3 py-1.5">
+            class="rounded-none border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-900 text-sm font-medium px-3 py-1.5">
             Generate new API key
           </button>
         </div>
@@ -85,34 +95,49 @@
       <div class="space-y-6">
         <div class="border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3">
           <label class="block text-xs font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-500 mb-2">Resume</label>
-          <p class="text-sm text-neutral-500 dark:text-neutral-500 mb-3">Uploaded once, factored into every job-fit check as an additional 0-100 fit score - it doesn't change whether you get notified, just adds a score you can see on the Listings page.</p>
+          <p class="text-sm text-neutral-500 dark:text-neutral-500 mb-3">Adds a 0-100 fit score on Listings; doesn't affect notifications. Only one source is active at a time.</p>
           <div id="resume-status" class="text-sm text-neutral-500 dark:text-neutral-500 mb-3">Loading…</div>
-          <input type="file" id="resume-file" accept="application/pdf"
-            class="w-full mb-3 text-sm file:mr-3 file:rounded-sm file:border-0 file:bg-neutral-900 file:text-white dark:file:bg-neutral-100 dark:file:text-neutral-900 file:text-sm file:font-medium file:px-3 file:py-1.5">
-          <div class="flex gap-3">
-            <button id="upload-resume-btn"
-              class="rounded-sm bg-neutral-900 hover:bg-neutral-700 dark:bg-neutral-100 dark:hover:bg-neutral-300 text-white dark:text-neutral-900 text-sm font-medium px-3 py-1.5">
+
+          <div class="flex gap-1 mb-3 border-b border-neutral-200 dark:border-neutral-800">
+            <button id="tab-upload-btn"
+              class="px-3 py-1.5 text-sm font-medium border-b-2 border-neutral-900 dark:border-neutral-100 text-neutral-900 dark:text-neutral-100">
               Upload
             </button>
-            <button id="remove-resume-btn"
-              class="hidden text-xs px-3 py-1.5 rounded-sm border border-red-200 dark:border-red-900 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950">
-              Remove resume
+            <button id="tab-url-btn"
+              class="px-3 py-1.5 text-sm font-medium border-b-2 border-transparent text-neutral-500 dark:text-neutral-500">
+              From URL
             </button>
           </div>
-          <div class="mt-4 pt-4 border-t border-neutral-200 dark:border-neutral-800">
-            <label class="block text-xs font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-500 mb-2">Or fetch from a URL</label>
-            <div class="flex gap-3">
+
+          <div id="tab-upload-panel">
+            <input type="file" id="resume-file" accept="application/pdf"
+              class="w-full mb-3 text-sm file:mr-3 file:rounded-none file:border-0 file:bg-neutral-900 file:text-white dark:file:bg-neutral-100 dark:file:text-neutral-900 file:text-sm file:font-medium file:px-3 file:py-1.5">
+            <button id="upload-resume-btn"
+              class="rounded-none bg-neutral-900 hover:opacity-50 dark:bg-neutral-100 text-white dark:text-neutral-900 text-sm font-medium px-3 py-1.5">
+              Upload
+            </button>
+          </div>
+
+          <div id="tab-url-panel" class="hidden">
+            <div class="flex gap-3 mb-2">
               <input type="url" id="resume-url" placeholder="https://example.com/resume.pdf"
-                class="flex-1 rounded-sm border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-neutral-500">
-              <button id="fetch-resume-url-btn"
-                class="rounded-sm border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-900 text-sm font-medium px-3 py-1.5">
-                Fetch
+                class="flex-1 rounded-none border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-neutral-500">
+              <button id="save-resume-url-btn"
+                class="rounded-none bg-neutral-900 hover:opacity-50 dark:bg-neutral-100 text-white dark:text-neutral-900 text-sm font-medium px-3 py-1.5">
+                Save
               </button>
             </div>
+            <p class="text-xs text-neutral-500 dark:text-neutral-500">Fetched live each time - no re-sync needed.</p>
           </div>
+
+          <button id="remove-resume-btn"
+            class="hidden mt-3 text-xs px-3 py-1.5 rounded-none border border-red-200 dark:border-red-900 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950">
+            Remove resume
+          </button>
+
           <details id="resume-preview" class="hidden mt-3">
             <summary class="text-sm text-neutral-500 dark:text-neutral-500 cursor-pointer">View extracted text</summary>
-            <pre id="resume-text" class="mt-2 max-h-64 overflow-y-auto whitespace-pre-wrap rounded-sm border border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 px-3 py-2 text-xs"></pre>
+            <pre id="resume-text" class="mt-2 max-h-64 overflow-y-auto whitespace-pre-wrap rounded-none border border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 px-3 py-2 text-xs"></pre>
           </details>
         </div>
       </div>
@@ -120,83 +145,46 @@
   </main>
 </div>
 
+<script src="/shared.js"></script>
 <script>
-const TOKEN_STORAGE = "job-alerts-access-token";
-let pendingSession = null;
-
-function token() {
-  return localStorage.getItem(TOKEN_STORAGE) || "";
-}
-
-async function apiFetch(path, options = {}) {
-  const response = await fetch(path, {
-    ...options,
-    headers: { ...(options.headers || {}), "Authorization": `Bearer ${token()}` },
-  });
-  if (response.status === 401) {
-    localStorage.removeItem(TOKEN_STORAGE);
-    showGate();
-    throw new Error("unauthorized");
-  }
-  return response;
-}
-
-function showGate() {
-  document.getElementById("gate").classList.remove("hidden");
-  document.getElementById("app").classList.add("hidden");
-}
-
-async function setupNav() {
-  try {
-    const response = await apiFetch("/api/me");
-    const me = await response.json();
-    document.getElementById("admin-nav-link").classList.toggle("hidden", !me.is_admin);
-    document.getElementById("logs-nav-link").classList.toggle("hidden", !me.is_admin);
-    document.getElementById("sources-nav-link").classList.toggle("hidden", !me.is_admin);
-  } catch (error) {
-    // apiFetch already shows the gate on 401
-  }
-}
-
 async function showApp() {
-  document.getElementById("gate").classList.add("hidden");
-  document.getElementById("app").classList.remove("hidden");
+  showAppShell();
   await setupNav();
   loadEmailConfig();
+  loadNtfyTopic();
   loadProfile();
 }
 
-document.getElementById("login-btn").addEventListener("click", async () => {
-  const errorEl = document.getElementById("login-error");
-  errorEl.classList.add("hidden");
-  const email = document.getElementById("email-input").value.trim();
+async function loadNtfyTopic() {
+  const response = await apiFetch("/api/me");
+  const me = await response.json();
+  document.getElementById("ntfy-topic").value = me.ntfy_topic || "";
+}
 
-  const body = pendingSession
-    ? { email, new_password: document.getElementById("new-password-input").value, session: pendingSession }
-    : { email, password: document.getElementById("password-input").value };
-
-  const response = await fetch("/api/login", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  const data = await response.json();
-
-  if (!response.ok) {
-    errorEl.textContent = data.error || "Login failed";
-    errorEl.className = "mt-3 text-sm text-red-600 dark:text-red-400";
+document.getElementById("save-ntfy-topic-btn").addEventListener("click", async () => {
+  const status = document.getElementById("ntfy-topic-status");
+  const ntfy_topic = document.getElementById("ntfy-topic").value.trim();
+  if (!ntfy_topic) {
+    status.textContent = "Enter a topic first";
     return;
   }
-  if (data.challenge === "NEW_PASSWORD_REQUIRED") {
-    pendingSession = data.session;
-    document.getElementById("password-input").classList.add("hidden");
-    document.getElementById("new-password-input").classList.remove("hidden");
-    errorEl.textContent = "First login - please set a new password";
-    errorEl.className = "mt-3 text-sm text-neutral-600 dark:text-neutral-400";
-    return;
+  status.textContent = "Saving...";
+  try {
+    const response = await apiFetch("/api/me", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ntfy_topic }),
+    });
+    if (!response.ok) {
+      const data = await response.json();
+      status.textContent = data.error || "Failed to save";
+      return;
+    }
+    status.textContent = "Saved";
+  } catch (error) {
+    status.textContent = "Failed to save";
   }
-  localStorage.setItem(TOKEN_STORAGE, data.access_token);
-  showApp();
+  setTimeout(() => { status.textContent = ""; }, 3000);
 });
 
 document.getElementById("generate-api-key-btn").addEventListener("click", async () => {
@@ -230,25 +218,58 @@ document.getElementById("save-email-btn").addEventListener("click", async () => 
   setTimeout(() => { status.textContent = ""; }, 3000);
 });
 
+function activateTab(mode) {
+  const isUpload = mode === "upload";
+  document.getElementById("tab-upload-panel").classList.toggle("hidden", !isUpload);
+  document.getElementById("tab-url-panel").classList.toggle("hidden", isUpload);
+  const activeClass = ["border-neutral-900", "dark:border-neutral-100", "text-neutral-900", "dark:text-neutral-100"];
+  const inactiveClass = ["border-transparent", "text-neutral-500", "dark:text-neutral-500"];
+  const uploadBtn = document.getElementById("tab-upload-btn");
+  const urlBtn = document.getElementById("tab-url-btn");
+  uploadBtn.classList.remove(...activeClass, ...inactiveClass);
+  urlBtn.classList.remove(...activeClass, ...inactiveClass);
+  uploadBtn.classList.add(...(isUpload ? activeClass : inactiveClass));
+  urlBtn.classList.add(...(isUpload ? inactiveClass : activeClass));
+}
+
+document.getElementById("tab-upload-btn").addEventListener("click", () => activateTab("upload"));
+document.getElementById("tab-url-btn").addEventListener("click", () => activateTab("url"));
+
 function renderProfile(profile) {
   const status = document.getElementById("resume-status");
   const removeBtn = document.getElementById("remove-resume-btn");
   const preview = document.getElementById("resume-preview");
+
+  if (profile.resume_url) {
+    activateTab("url");
+    document.getElementById("resume-url").value = profile.resume_url;
+  } else if (profile.resume_filename) {
+    activateTab("upload");
+    document.getElementById("resume-url").value = "";
+  } else {
+    document.getElementById("resume-url").value = "";
+  }
+
   if (!profile.resume_filename) {
-    status.textContent = "No resume uploaded yet";
+    status.textContent = "No resume set yet";
     removeBtn.classList.add("hidden");
     preview.classList.add("hidden");
-    document.getElementById("resume-url").value = "";
     return;
   }
-  const uploaded = profile.resume_uploaded_at
+
+  const set = profile.resume_uploaded_at
     ? new Date(profile.resume_uploaded_at * 1000).toLocaleString()
     : "unknown time";
-  status.textContent = `${profile.resume_filename} - uploaded ${uploaded}`;
+  if (profile.resume_url) {
+    status.textContent = profile.resume_fetch_error
+      ? `${profile.resume_url} - fetch failed: ${profile.resume_fetch_error}`
+      : profile.resume_url;
+  } else {
+    status.textContent = `${profile.resume_filename} - uploaded ${set}`;
+  }
   removeBtn.classList.remove("hidden");
   document.getElementById("resume-text").textContent = profile.resume_text || "";
-  preview.classList.remove("hidden");
-  document.getElementById("resume-url").value = profile.resume_url || "";
+  preview.classList.toggle("hidden", !profile.resume_text);
 }
 
 async function loadProfile() {
@@ -297,7 +318,7 @@ document.getElementById("upload-resume-btn").addEventListener("click", async () 
   }
 });
 
-document.getElementById("fetch-resume-url-btn").addEventListener("click", async () => {
+document.getElementById("save-resume-url-btn").addEventListener("click", async () => {
   const status = document.getElementById("resume-status");
   const urlInput = document.getElementById("resume-url");
   const url = urlInput.value.trim();
@@ -305,7 +326,7 @@ document.getElementById("fetch-resume-url-btn").addEventListener("click", async 
     status.textContent = "Enter a URL first";
     return;
   }
-  status.textContent = "Fetching…";
+  status.textContent = "Checking URL…";
   try {
     const response = await apiFetch("/api/profile/resume-url", {
       method: "POST",
@@ -314,12 +335,12 @@ document.getElementById("fetch-resume-url-btn").addEventListener("click", async 
     });
     const data = await response.json();
     if (!response.ok) {
-      status.textContent = data.error || "Fetch failed";
+      status.textContent = data.error || "Save failed";
       return;
     }
     renderProfile(data);
   } catch (error) {
-    status.textContent = "Fetch failed";
+    status.textContent = "Save failed";
   }
 });
 

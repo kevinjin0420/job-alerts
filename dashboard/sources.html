@@ -4,8 +4,15 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>job-alerts dashboard - sources</title>
+<script>
+  (function() {
+    var stored = localStorage.getItem("job-alerts-theme");
+    var isDark = stored ? stored === "dark" : window.matchMedia("(prefers-color-scheme: dark)").matches;
+    document.documentElement.classList.toggle("dark", isDark);
+  })();
+</script>
 <script src="https://cdn.tailwindcss.com"></script>
-<script>tailwind.config = { darkMode: "media" };</script>
+<script>tailwind.config = { darkMode: "class" };</script>
 <style>
   ::-webkit-scrollbar { width: 10px; height: 10px; }
   ::-webkit-scrollbar-track { background: transparent; }
@@ -20,42 +27,31 @@
 <body class="bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100 min-h-screen">
 
 <div id="gate" class="min-h-screen flex items-center justify-center p-6">
-  <div class="w-full max-w-sm rounded-sm border border-neutral-300 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-6">
+  <div class="w-full max-w-sm rounded-none border border-neutral-300 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-6">
     <h1 class="text-sm font-semibold tracking-wide uppercase text-center">job-alerts</h1>
     <p class="mt-1 text-sm text-neutral-500 dark:text-neutral-500 text-center">Sign in to continue</p>
     <div id="login-error" class="mt-3 text-sm hidden"></div>
     <input type="email" id="email-input" placeholder="Email"
-      class="mt-4 w-full rounded-sm border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-neutral-500">
+      class="mt-4 w-full rounded-none border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-neutral-500">
     <input type="password" id="password-input" placeholder="Password"
-      class="mt-3 w-full rounded-sm border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-neutral-500">
+      class="mt-3 w-full rounded-none border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-neutral-500">
     <input type="password" id="new-password-input" placeholder="New password"
-      class="hidden mt-3 w-full rounded-sm border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-neutral-500">
+      class="hidden mt-3 w-full rounded-none border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-neutral-500">
     <button id="login-btn"
-      class="mt-3 w-full rounded-sm bg-neutral-900 hover:bg-neutral-700 dark:bg-neutral-100 dark:hover:bg-neutral-300 text-white dark:text-neutral-900 text-sm font-medium px-3 py-1.5">
+      class="mt-3 w-full rounded-none bg-neutral-900 hover:opacity-50 dark:bg-neutral-100 text-white dark:text-neutral-900 text-sm font-medium px-3 py-1.5">
       Sign in
     </button>
   </div>
 </div>
 
 <div id="app" class="hidden flex min-h-screen">
-  <aside class="w-52 shrink-0 border-r border-neutral-200 dark:border-neutral-800 p-3">
-    <div class="text-xs font-semibold tracking-widest uppercase mb-8">job-alerts</div>
-    <nav class="flex flex-col gap-1 text-sm">
-      <a href="/metrics" class="px-3 py-2 rounded-sm text-neutral-600 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-900">Metrics</a>
-      <a href="/listings" class="px-3 py-2 rounded-sm text-neutral-600 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-900">Listings</a>
-      <a href="/config" class="px-3 py-2 rounded-sm text-neutral-600 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-900">Config</a>
-      <a href="/profile" class="px-3 py-2 rounded-sm text-neutral-600 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-900">Profile</a>
-      <a href="/logs" id="logs-nav-link" class="hidden px-3 py-2 rounded-sm text-neutral-600 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-900">Logs</a>
-      <a href="/sources" id="sources-nav-link" class="hidden px-3 py-2 rounded-sm font-medium bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900">Sources</a>
-      <a href="/admin" id="admin-nav-link" class="hidden px-3 py-2 rounded-sm text-neutral-600 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-900">Admin</a>
-    </nav>
-  </aside>
+__SIDEBAR__
 
   <main class="flex-1 p-6">
     <div class="flex items-center justify-between mb-6">
       <h2 class="text-xs font-semibold tracking-widest uppercase text-neutral-500 dark:text-neutral-500">Companies</h2>
       <button id="refresh-btn"
-        class="text-xs px-3 py-1.5 rounded-sm border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-900">
+        class="text-xs px-3 py-1.5 rounded-none border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-900">
         Refresh
       </button>
     </div>
@@ -64,8 +60,8 @@
       <label class="block text-xs font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-500 mb-2">Add a company</label>
       <div class="grid sm:grid-cols-3 gap-3 mb-3">
         <input type="text" id="new-company-name" placeholder="Company name"
-          class="rounded-sm border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-neutral-500">
-        <select id="new-company-kind" class="rounded-sm border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm">
+          class="rounded-none border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-neutral-500">
+        <select id="new-company-kind" class="rounded-none border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm">
           <option value="community">Community filter only</option>
           <option value="greenhouse">Greenhouse-backed</option>
           <option value="ashby">Ashby-backed</option>
@@ -73,110 +69,40 @@
           <option value="zyte">Zyte-backed (paid, anti-bot bypass)</option>
         </select>
         <button id="add-company-btn"
-          class="rounded-sm bg-neutral-900 hover:bg-neutral-700 dark:bg-neutral-100 dark:hover:bg-neutral-300 text-white dark:text-neutral-900 text-sm font-medium px-3 py-1.5">
+          class="rounded-none bg-neutral-900 hover:opacity-50 dark:bg-neutral-100 text-white dark:text-neutral-900 text-sm font-medium px-3 py-1.5">
           Add
         </button>
       </div>
       <input type="text" id="new-company-token" placeholder="Greenhouse board token"
-        class="hidden w-full mb-3 rounded-sm border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-neutral-500">
+        class="hidden w-full mb-3 rounded-none border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-neutral-500">
       <input type="text" id="new-company-board-name" placeholder="Ashby board name (from jobs.ashbyhq.com/<board-name>)"
-        class="hidden w-full mb-3 rounded-sm border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-neutral-500">
-      <div id="new-company-direct-fields" class="hidden grid sm:grid-cols-3 gap-3 mb-3">
+        class="hidden w-full mb-3 rounded-none border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-neutral-500">
+      <div id="new-company-direct-fields" class="grid sm:grid-cols-3 gap-3 mb-3">
         <input type="text" id="new-company-intern-url" placeholder="Intern listings URL"
-          class="rounded-sm border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-neutral-500">
+          class="rounded-none border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-neutral-500">
         <input type="text" id="new-company-newgrad-url" placeholder="New grad listings URL"
-          class="rounded-sm border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-neutral-500">
+          class="rounded-none border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-neutral-500">
         <input type="text" id="new-company-fulltime-url" placeholder="Full-time listings URL"
-          class="rounded-sm border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-neutral-500">
+          class="rounded-none border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-neutral-500">
       </div>
+      <p class="text-xs text-neutral-500 dark:text-neutral-500 mb-2">If the source can't filter by role (e.g. greenhouse/ashby/community), use the same URL for all three.</p>
       <p id="add-company-status" class="mt-2 text-sm text-neutral-500 dark:text-neutral-500"></p>
     </div>
 
-    <div id="companies-table" class="border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 mb-10"></div>
-
-    <h2 class="text-xs font-semibold tracking-widest uppercase text-neutral-500 dark:text-neutral-500 mb-6">Source health</h2>
-    <div id="source-health-table" class="border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900"></div>
+    <div id="companies-table" class="border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900"></div>
   </main>
 </div>
 
+<script src="/shared.js"></script>
 <script>
-const TOKEN_STORAGE = "job-alerts-access-token";
-let pendingSession = null;
-
-function token() {
-  return localStorage.getItem(TOKEN_STORAGE) || "";
-}
-
-async function apiFetch(path, options = {}) {
-  const response = await fetch(path, {
-    ...options,
-    headers: { ...(options.headers || {}), "Authorization": `Bearer ${token()}` },
-  });
-  if (response.status === 401) {
-    localStorage.removeItem(TOKEN_STORAGE);
-    showGate();
-    throw new Error("unauthorized");
-  }
-  return response;
-}
-
-function showGate() {
-  document.getElementById("gate").classList.remove("hidden");
-  document.getElementById("app").classList.add("hidden");
-}
-
 async function showApp() {
-  document.getElementById("gate").classList.add("hidden");
-  document.getElementById("app").classList.remove("hidden");
-  const response = await apiFetch("/api/me");
-  const me = await response.json();
-  if (!me.is_admin) {
-    window.location.href = "/metrics";
-    return;
-  }
-  document.getElementById("admin-nav-link").classList.remove("hidden");
-  document.getElementById("logs-nav-link").classList.remove("hidden");
-  document.getElementById("sources-nav-link").classList.remove("hidden");
+  showAppShell();
+  if (!(await requireAdmin())) return;
   loadCompanies();
-  loadSourceHealth();
 }
-
-document.getElementById("login-btn").addEventListener("click", async () => {
-  const errorEl = document.getElementById("login-error");
-  errorEl.classList.add("hidden");
-  const email = document.getElementById("email-input").value.trim();
-
-  const body = pendingSession
-    ? { email, new_password: document.getElementById("new-password-input").value, session: pendingSession }
-    : { email, password: document.getElementById("password-input").value };
-
-  const response = await fetch("/api/login", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  const data = await response.json();
-
-  if (!response.ok) {
-    errorEl.textContent = data.error || "Login failed";
-    errorEl.className = "mt-3 text-sm text-red-600 dark:text-red-400";
-    return;
-  }
-  if (data.challenge === "NEW_PASSWORD_REQUIRED") {
-    pendingSession = data.session;
-    document.getElementById("password-input").classList.add("hidden");
-    document.getElementById("new-password-input").classList.remove("hidden");
-    errorEl.textContent = "First login - please set a new password";
-    errorEl.className = "mt-3 text-sm text-neutral-600 dark:text-neutral-400";
-    return;
-  }
-  localStorage.setItem(TOKEN_STORAGE, data.access_token);
-  showApp();
-});
 
 document.getElementById("refresh-btn").addEventListener("click", () => {
   loadCompanies();
-  loadSourceHealth();
 });
 
 function renderMessage(container, text, extraClass) {
@@ -187,7 +113,6 @@ document.getElementById("new-company-kind").addEventListener("change", (event) =
   const kind = event.target.value;
   document.getElementById("new-company-token").classList.toggle("hidden", kind !== "greenhouse");
   document.getElementById("new-company-board-name").classList.toggle("hidden", kind !== "ashby");
-  document.getElementById("new-company-direct-fields").classList.toggle("hidden", kind !== "direct" && kind !== "zyte");
 });
 
 document.getElementById("add-company-btn").addEventListener("click", async () => {
@@ -224,13 +149,45 @@ document.getElementById("add-company-btn").addEventListener("click", async () =>
   }
 });
 
+// A company's exact source_name isn't always knowable from the catalog alone -
+// ashby/direct/zyte are parameterized per job_type, so a company only gets a
+// concrete name once some user has actually selected a job_type for it (and
+// may end up with multiple, one per job_type). Prefix matching handles that;
+// greenhouse and the flat kinds (community/apple/google) have a single
+// deterministic name, matched exactly.
+function getCompanyHealthRows(company, healthSources) {
+  const kind = company.source_kind;
+  if (kind === "greenhouse" && company.board_token) {
+    return healthSources.filter((s) => s.source_name === `greenhouse:${company.company_name}:${company.board_token}`);
+  }
+  if (kind === "ashby" && company.board_name) {
+    return healthSources.filter((s) => s.source_name.startsWith(`ashby:${company.board_name}:`));
+  }
+  if (kind === "direct" || kind === "zyte") {
+    return healthSources.filter((s) => s.source_name.startsWith(`${kind}:${company.company_name}:`));
+  }
+  if (kind === "community" || kind === "apple" || kind === "google") {
+    return healthSources.filter((s) => s.source_name === kind);
+  }
+  return [];
+}
+
+function formatSuccessRate(successCount, failureCount) {
+  const total = successCount + failureCount;
+  return total === 0 ? "-" : `${Math.round((successCount / total) * 100)}%`;
+}
+
 async function loadCompanies() {
   const container = document.getElementById("companies-table");
   renderMessage(container, "Loading…", "text-neutral-500 dark:text-neutral-500");
-  let companies;
+  let companies, healthSources;
   try {
-    const response = await apiFetch("/api/admin/companies");
-    ({ companies } = await response.json());
+    const [companiesResponse, healthResponse] = await Promise.all([
+      apiFetch("/api/admin/companies"),
+      apiFetch("/api/admin/source-health"),
+    ]);
+    ({ companies } = await companiesResponse.json());
+    ({ sources: healthSources } = await healthResponse.json());
   } catch (error) {
     renderMessage(container, "Failed to load companies", "text-red-600 dark:text-red-400");
     return;
@@ -248,6 +205,9 @@ async function loadCompanies() {
         <th class="px-3 py-2 font-medium">Kind</th>
         <th class="px-3 py-2 font-medium">Job types</th>
         <th class="px-3 py-2 font-medium">Details</th>
+        <th class="px-3 py-2 font-medium">Last success</th>
+        <th class="px-3 py-2 font-medium">Last failure</th>
+        <th class="px-3 py-2 font-medium">Success rate</th>
         <th class="px-3 py-2 font-medium"></th>
       </tr>
     </thead>
@@ -260,66 +220,34 @@ async function loadCompanies() {
       .filter((field) => company[field])
       .map((field) => field.replace("_url", ""))
       .join(", ");
+
+    const healthRows = getCompanyHealthRows(company, healthSources);
+    const neverRun = healthRows.length === 0;
+    const lastSuccessAt = neverRun ? null : Math.max(...healthRows.map((r) => r.last_success_at || 0)) || null;
+    const lastFailureAt = neverRun ? null : Math.max(...healthRows.map((r) => r.last_failure_at || 0)) || null;
+    const successCount = healthRows.reduce((sum, r) => sum + (r.success_count || 0), 0);
+    const failureCount = healthRows.reduce((sum, r) => sum + (r.failure_count || 0), 0);
+    const lastSuccess = neverRun ? "Never run" : lastSuccessAt ? new Date(lastSuccessAt * 1000).toISOString().replace(/\.\d{3}Z$/, "Z") : "-";
+    const lastFailure = neverRun ? "Never run" : lastFailureAt ? new Date(lastFailureAt * 1000).toISOString().replace(/\.\d{3}Z$/, "Z") : "-";
+
     row.innerHTML = `
       <td class="px-3 py-2">${company.company_name}</td>
       <td class="px-3 py-2">${company.source_kind}</td>
       <td class="px-3 py-2 text-neutral-500 dark:text-neutral-500">${jobTypes || "-"}</td>
       <td class="px-3 py-2 font-mono text-xs text-neutral-500 dark:text-neutral-500">${company.board_token || company.board_name || "-"}</td>
+      <td class="px-3 py-2 font-mono text-xs text-neutral-500 dark:text-neutral-500">${lastSuccess}</td>
+      <td class="px-3 py-2 font-mono text-xs text-neutral-500 dark:text-neutral-500">${lastFailure}</td>
+      <td class="px-3 py-2">${neverRun ? "-" : formatSuccessRate(successCount, failureCount)}</td>
       <td class="px-3 py-2 text-right"></td>
     `;
     const removeBtn = document.createElement("button");
     removeBtn.textContent = "Remove";
-    removeBtn.className = "text-xs px-2 py-1 rounded-sm border border-red-200 dark:border-red-900 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950";
+    removeBtn.className = "text-xs px-2 py-1 rounded-none border border-red-200 dark:border-red-900 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950";
     removeBtn.addEventListener("click", async () => {
       await apiFetch(`/api/admin/companies/${encodeURIComponent(company.company_name)}`, { method: "DELETE" });
       loadCompanies();
     });
     row.lastElementChild.appendChild(removeBtn);
-    tbody.appendChild(row);
-  }
-  table.appendChild(tbody);
-  container.innerHTML = "";
-  container.appendChild(table);
-}
-
-async function loadSourceHealth() {
-  const container = document.getElementById("source-health-table");
-  renderMessage(container, "Loading…", "text-neutral-500 dark:text-neutral-500");
-  let sources;
-  try {
-    const response = await apiFetch("/api/admin/source-health");
-    ({ sources } = await response.json());
-  } catch (error) {
-    renderMessage(container, "Failed to load source health", "text-red-600 dark:text-red-400");
-    return;
-  }
-  if (sources.length === 0) {
-    renderMessage(container, "No source data yet", "text-neutral-500 dark:text-neutral-500");
-    return;
-  }
-  const table = document.createElement("table");
-  table.className = "w-full text-sm";
-  table.innerHTML = `
-    <thead>
-      <tr class="border-b border-neutral-200 dark:border-neutral-800 text-left text-xs uppercase tracking-wide text-neutral-500 dark:text-neutral-500">
-        <th class="px-3 py-2 font-medium">Source</th>
-        <th class="px-3 py-2 font-medium">Last success</th>
-        <th class="px-3 py-2 font-medium">Last failure</th>
-        <th class="px-3 py-2 font-medium">Consecutive failures</th>
-      </tr>
-    </thead>
-  `;
-  const tbody = document.createElement("tbody");
-  for (const source of sources) {
-    const row = document.createElement("tr");
-    row.className = "border-b border-neutral-100 dark:border-neutral-900 last:border-0";
-    const unhealthy = (source.consecutive_failures || 0) > 0;
-    row.innerHTML = `
-      <td class="px-3 py-2">${source.source_name}</td>
-      <td class="px-3 py-2 font-mono text-xs text-neutral-500 dark:text-neutral-500">${source.last_success_at ? new Date(source.last_success_at * 1000).toISOString().replace(/\.\d{3}Z$/, "Z") : "-"}</td>
-      <td class="px-3 py-2 font-mono text-xs text-neutral-500 dark:text-neutral-500">${source.last_failure_at ? new Date(source.last_failure_at * 1000).toISOString().replace(/\.\d{3}Z$/, "Z") : "-"}</td>
-      <td class="px-3 py-2 ${unhealthy ? "text-red-600 dark:text-red-400" : ""}">${source.consecutive_failures || 0}</td>
-    `;
     tbody.appendChild(row);
   }
   table.appendChild(tbody);

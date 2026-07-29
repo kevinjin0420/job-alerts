@@ -20,6 +20,7 @@ class ClassifierError(Exception):
 class ClassificationResult:
     fits: bool
     reason: str
+    is_job_posting: bool = True
     fit_score: int | None = None
 
 
@@ -34,12 +35,19 @@ def is_good_fit(
     )
 
     properties: dict[str, object] = {
+        "is_job_posting": {
+            "type": "boolean",
+            "description": "false if this is scraped page furniture (nav link, footer link, cookie notice, "
+            "image caption, etc.) rather than an actual job posting",
+        },
         "fits": {"type": "boolean"},
         "reason": {"type": "string"},
     }
-    required = ["fits", "reason"]
+    required = ["is_job_posting", "fits", "reason"]
     response_instruction = (
-        'Respond with a JSON object: {"fits": true or false, "reason": "one short sentence explaining why"}.'
+        'Respond with a JSON object: {"is_job_posting": true or false (false if this text/link is not actually '
+        'a job posting - e.g. nav/footer link, cookie notice, image caption), "fits": true or false, '
+        '"reason": "one short sentence explaining why"}.'
     )
     system_content = f"{fit_prompt}\n\n{response_instruction}"
 
@@ -52,7 +60,9 @@ def is_good_fit(
         }
         required.append("fit_score")
         response_instruction = (
-            'Respond with a JSON object: {"fits": true or false, "reason": "one short sentence explaining why", '
+            'Respond with a JSON object: {"is_job_posting": true or false (false if this text/link is not actually '
+            'a job posting - e.g. nav/footer link, cookie notice, image caption), "fits": true or false, '
+            '"reason": "one short sentence explaining why", '
             '"fit_score": integer from 0 to 100 rating how well the resume matches this listing}.'
         )
         system_content = f"{fit_prompt}\n\nCandidate resume:\n{resume_text}\n\n{response_instruction}"
@@ -97,9 +107,11 @@ def is_good_fit(
     try:
         content = payload["choices"][0]["message"]["content"]
         parsed = json.loads(content)
+        is_job_posting = bool(parsed["is_job_posting"])
         result = ClassificationResult(
-            fits=bool(parsed["fits"]),
+            fits=is_job_posting and bool(parsed["fits"]),
             reason=str(parsed["reason"]),
+            is_job_posting=is_job_posting,
             fit_score=int(parsed["fit_score"]) if "fit_score" in parsed else None,
         )
     except (KeyError, IndexError, TypeError, json.JSONDecodeError) as error:
@@ -116,6 +128,7 @@ def is_good_fit(
                 "event": "classifier_call",
                 "model": model,
                 "fit": result.fits,
+                "is_job_posting": result.is_job_posting,
                 "fit_score": result.fit_score,
                 "input_tokens": input_tokens,
                 "output_tokens": output_tokens,

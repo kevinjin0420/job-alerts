@@ -84,6 +84,8 @@ ZIP_PATH="$(mktemp -u /tmp/job-alerts-XXXXXX).zip"
 trap 'rm -rf "${STAGE_DIR}" "${ZIP_PATH}"' EXIT
 cp "${REPO_ROOT}"/*.py "${STAGE_DIR}/"
 cp -r "${REPO_ROOT}/sources" "${STAGE_DIR}/sources"
+echo "==> Installing dependencies"
+pip install --target "${STAGE_DIR}" pypdf --quiet
 (cd "${STAGE_DIR}" && zip -qr "${ZIP_PATH}" .)
 
 echo "==> Writing Lambda environment config"

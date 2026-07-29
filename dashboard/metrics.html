@@ -4,8 +4,15 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>job-alerts dashboard - metrics</title>
+<script>
+  (function() {
+    var stored = localStorage.getItem("job-alerts-theme");
+    var isDark = stored ? stored === "dark" : window.matchMedia("(prefers-color-scheme: dark)").matches;
+    document.documentElement.classList.toggle("dark", isDark);
+  })();
+</script>
 <script src="https://cdn.tailwindcss.com"></script>
-<script>tailwind.config = { darkMode: "media" };</script>
+<script>tailwind.config = { darkMode: "class" };</script>
 <style>
   ::-webkit-scrollbar { width: 10px; height: 10px; }
   ::-webkit-scrollbar-track { background: transparent; }
@@ -20,42 +27,31 @@
 <body class="bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100 min-h-screen">
 
 <div id="gate" class="min-h-screen flex items-center justify-center p-6">
-  <div class="w-full max-w-sm rounded-sm border border-neutral-300 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-6">
+  <div class="w-full max-w-sm rounded-none border border-neutral-300 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-6">
     <h1 class="text-sm font-semibold tracking-wide uppercase text-center">job-alerts</h1>
     <p class="mt-1 text-sm text-neutral-500 dark:text-neutral-500 text-center">Sign in to continue</p>
     <div id="login-error" class="mt-3 text-sm hidden"></div>
     <input type="email" id="email-input" placeholder="Email"
-      class="mt-4 w-full rounded-sm border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-neutral-500">
+      class="mt-4 w-full rounded-none border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-neutral-500">
     <input type="password" id="password-input" placeholder="Password"
-      class="mt-3 w-full rounded-sm border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-neutral-500">
+      class="mt-3 w-full rounded-none border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-neutral-500">
     <input type="password" id="new-password-input" placeholder="New password"
-      class="hidden mt-3 w-full rounded-sm border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-neutral-500">
+      class="hidden mt-3 w-full rounded-none border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-neutral-500">
     <button id="login-btn"
-      class="mt-3 w-full rounded-sm bg-neutral-900 hover:bg-neutral-700 dark:bg-neutral-100 dark:hover:bg-neutral-300 text-white dark:text-neutral-900 text-sm font-medium px-3 py-1.5">
+      class="mt-3 w-full rounded-none bg-neutral-900 hover:opacity-50 dark:bg-neutral-100 text-white dark:text-neutral-900 text-sm font-medium px-3 py-1.5">
       Sign in
     </button>
   </div>
 </div>
 
 <div id="app" class="hidden flex min-h-screen">
-  <aside class="w-52 shrink-0 border-r border-neutral-200 dark:border-neutral-800 p-3">
-    <div class="text-xs font-semibold tracking-widest uppercase mb-8">job-alerts</div>
-    <nav class="flex flex-col gap-1 text-sm">
-      <a href="/metrics" class="px-3 py-2 rounded-sm font-medium bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900">Metrics</a>
-      <a href="/listings" class="px-3 py-2 rounded-sm text-neutral-600 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-900">Listings</a>
-      <a href="/config" class="px-3 py-2 rounded-sm text-neutral-600 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-900">Config</a>
-      <a href="/profile" class="px-3 py-2 rounded-sm text-neutral-600 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-900">Profile</a>
-      <a href="/logs" id="logs-nav-link" class="hidden px-3 py-2 rounded-sm text-neutral-600 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-900">Logs</a>
-      <a href="/sources" id="sources-nav-link" class="hidden px-3 py-2 rounded-sm text-neutral-600 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-900">Sources</a>
-      <a href="/admin" id="admin-nav-link" class="hidden px-3 py-2 rounded-sm text-neutral-600 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-900">Admin</a>
-    </nav>
-  </aside>
+__SIDEBAR__
 
   <main class="flex-1 p-6">
     <div class="flex items-baseline justify-between mb-6">
       <h2 class="text-xs font-semibold tracking-widest uppercase text-neutral-500 dark:text-neutral-500">Metrics &middot; last 24h</h2>
       <button id="refresh-btn"
-        class="text-xs px-3 py-1.5 rounded-sm border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-900">
+        class="text-xs px-3 py-1.5 rounded-none border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-900">
         Refresh
       </button>
     </div>
@@ -64,14 +60,8 @@
   </main>
 </div>
 
+<script src="/shared.js"></script>
 <script>
-const TOKEN_STORAGE = "job-alerts-access-token";
-let pendingSession = null;
-
-function token() {
-  return localStorage.getItem(TOKEN_STORAGE) || "";
-}
-
 // matches aws/config.env's SCHEDULE_RATE
 const SCHEDULE_INTERVAL_SECONDS = 300;
 let nextRunAt = null;
@@ -82,75 +72,11 @@ function formatLocalDate(value) {
   return `${date.getFullYear()}/${pad(date.getMonth() + 1)}/${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 }
 
-async function apiFetch(path, options = {}) {
-  const response = await fetch(path, {
-    ...options,
-    headers: { ...(options.headers || {}), "Authorization": `Bearer ${token()}` },
-  });
-  if (response.status === 401) {
-    localStorage.removeItem(TOKEN_STORAGE);
-    showGate();
-    throw new Error("unauthorized");
-  }
-  return response;
-}
-
-function showGate() {
-  document.getElementById("gate").classList.remove("hidden");
-  document.getElementById("app").classList.add("hidden");
-}
-
-async function setupNav() {
-  try {
-    const response = await apiFetch("/api/me");
-    const me = await response.json();
-    document.getElementById("admin-nav-link").classList.toggle("hidden", !me.is_admin);
-    document.getElementById("logs-nav-link").classList.toggle("hidden", !me.is_admin);
-    document.getElementById("sources-nav-link").classList.toggle("hidden", !me.is_admin);
-  } catch (error) {
-    // apiFetch already shows the gate on 401
-  }
-}
-
 async function showApp() {
-  document.getElementById("gate").classList.add("hidden");
-  document.getElementById("app").classList.remove("hidden");
+  showAppShell();
   await setupNav();
   loadMetrics();
 }
-
-document.getElementById("login-btn").addEventListener("click", async () => {
-  const errorEl = document.getElementById("login-error");
-  errorEl.classList.add("hidden");
-  const email = document.getElementById("email-input").value.trim();
-
-  const body = pendingSession
-    ? { email, new_password: document.getElementById("new-password-input").value, session: pendingSession }
-    : { email, password: document.getElementById("password-input").value };
-
-  const response = await fetch("/api/login", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  const data = await response.json();
-
-  if (!response.ok) {
-    errorEl.textContent = data.error || "Login failed";
-    errorEl.className = "mt-3 text-sm text-red-600 dark:text-red-400";
-    return;
-  }
-  if (data.challenge === "NEW_PASSWORD_REQUIRED") {
-    pendingSession = data.session;
-    document.getElementById("password-input").classList.add("hidden");
-    document.getElementById("new-password-input").classList.remove("hidden");
-    errorEl.textContent = "First login - please set a new password";
-    errorEl.className = "mt-3 text-sm text-neutral-600 dark:text-neutral-400";
-    return;
-  }
-  localStorage.setItem(TOKEN_STORAGE, data.access_token);
-  showApp();
-});
 
 document.getElementById("refresh-btn").addEventListener("click", loadMetrics);
 
@@ -163,9 +89,16 @@ function formatPercent(numerator, denominator) {
   return `${((numerator / denominator) * 100).toFixed(1)}%`;
 }
 
-function buildSections(metrics) {
+function buildSections(metrics, listingCounts) {
   nextRunAt = metrics.last_ran ? new Date(metrics.last_ran).getTime() + SCHEDULE_INTERVAL_SECONDS * 1000 : null;
   return [
+    {
+      title: "Schedule",
+      cards: [
+        ["Last ran", metrics.last_ran ? formatLocalDate(metrics.last_ran) : "-"],
+        ["Next scheduled run", nextRunAt ? formatLocalDate(nextRunAt) : "-"],
+      ],
+    },
     {
       title: "Execution",
       cards: [
@@ -173,8 +106,15 @@ function buildSections(metrics) {
         ["Errors", formatNumber(metrics.errors_24h)],
         ["Success rate", formatPercent(metrics.invocations_24h - metrics.errors_24h, metrics.invocations_24h)],
         ["Avg duration (ms)", formatNumber(metrics.avg_duration_ms)],
-        ["Last ran", metrics.last_ran ? formatLocalDate(metrics.last_ran) : "-"],
-        ["Next scheduled run", nextRunAt ? formatLocalDate(nextRunAt) : "-"],
+      ],
+    },
+    {
+      title: "Listings",
+      cards: [
+        ["Total tracked", formatNumber(listingCounts.total)],
+        ["Notified", formatNumber(listingCounts.notified)],
+        ["Dismissed", formatNumber(listingCounts.dismissed)],
+        ["Seeded (first run)", formatNumber(listingCounts.seeded)],
       ],
     },
     {
@@ -186,6 +126,14 @@ function buildSections(metrics) {
   ];
 }
 
+function countListingsByStatus(listings) {
+  const counts = { total: listings.length, notified: 0, dismissed: 0, seeded: 0 };
+  for (const item of listings) {
+    if (item.status in counts) counts[item.status] += 1;
+  }
+  return counts;
+}
+
 function renderMessage(container, text, extraClass) {
   container.innerHTML = `<div class="border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 px-4 py-6 text-sm ${extraClass}">${text}</div>`;
 }
@@ -193,16 +141,21 @@ function renderMessage(container, text, extraClass) {
 async function loadMetrics() {
   const container = document.getElementById("metric-sections");
   renderMessage(container, "Loading…", "text-neutral-500 dark:text-neutral-500");
-  let metrics;
+  let metrics, listingCounts;
   try {
-    const response = await apiFetch("/api/metrics");
-    metrics = await response.json();
+    const [metricsResponse, listingsResponse] = await Promise.all([
+      apiFetch("/api/metrics"),
+      apiFetch("/api/listings"),
+    ]);
+    metrics = await metricsResponse.json();
+    const { listings } = await listingsResponse.json();
+    listingCounts = countListingsByStatus(listings);
   } catch (error) {
     renderMessage(container, "Failed to load metrics", "text-red-600 dark:text-red-400");
     return;
   }
   container.innerHTML = "";
-  for (const section of buildSections(metrics)) {
+  for (const section of buildSections(metrics, listingCounts)) {
     const wrapper = document.createElement("section");
     const grid = document.createElement("div");
     grid.className = "grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-px bg-neutral-200 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-800";

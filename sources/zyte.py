@@ -8,7 +8,7 @@ import time
 import urllib.parse
 import urllib.request
 
-from .base import Listing
+from .base import Listing, looks_like_job_posting_url
 
 ZYTE_EXTRACT_URL = "https://api.zyte.com/v1/extract"
 REQUEST_TIMEOUT_SECONDS = 60
@@ -65,7 +65,7 @@ class ZyteSource:
             if len(title) < MIN_TITLE_LENGTH:
                 continue
             absolute_url = urllib.parse.urljoin(self._url, href)
-            if absolute_url in seen_urls:
+            if absolute_url in seen_urls or not looks_like_job_posting_url(absolute_url):
                 continue
             seen_urls.add(absolute_url)
             matches.append(

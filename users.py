@@ -17,6 +17,8 @@ USAGE_TABLE = "job-alerts-usage"
 COMPANIES_TABLE = "job-alerts-companies"
 SOURCE_HEALTH_TABLE = "job-alerts-source-health"
 USER_PROFILE_TABLE = "job-alerts-user-profile"
+SETTINGS_TABLE = "job-alerts-settings"
+DEFAULT_CLASSIFIER_MODEL = "qwen/qwen3.6-flash"
 
 _dynamodb = boto3.client("dynamodb")
 _deserializer = TypeDeserializer()
@@ -74,8 +76,8 @@ def load_seen_ids(user_id: str) -> set[str]:
 
 def record_listings(user_id: str, entries: list[tuple[Listing, str, str, int | None]]) -> None:
     """entries are (listing, status, reason, fit_score). status is 'notified',
-    'rejected', or 'seeded'. fit_score is None unless the user has a resume
-    uploaded (see classifier.is_good_fit)."""
+    'dismissed', 'invalid' (scraped junk, not an actual job posting), or 'seeded'.
+    fit_score is None unless the user has a resume uploaded (see classifier.is_good_fit)."""
     now = int(time.time())
     for listing, status, reason, fit_score in entries:
         item: dict[str, Any] = {
@@ -133,6 +135,15 @@ def get_user(user_id: str) -> dict[str, Any] | None:
     return _unwrap_item(item) if item else None
 
 
+def save_ntfy_topic(user_id: str, ntfy_topic: str) -> None:
+    _dynamodb.update_item(
+        TableName=USERS_TABLE,
+        Key={"user_id": {"S": user_id}},
+        UpdateExpression="SET ntfy_topic = :t",
+        ExpressionAttributeValues={":t": {"S": ntfy_topic}},
+    )
+
+
 def save_user_config(user_id: str, config: dict[str, Any]) -> None:
     item = dict(config)
     item["user_id"] = user_id
@@ -157,9 +168,7 @@ def create_user(user_id: str, *, is_admin: bool, ntfy_topic: str) -> None:
         user_id,
         {
             "fit_prompt": "",
-            "classifier_model": "qwen/qwen3.6-flash",
             "companies": [],
-            "enabled_sources": ["community"],
             "job_types": ["intern"],
             "email_to": [user_id],
         },
@@ -297,13 +306,17 @@ def delete_company(name: str) -> None:
 
 
 def record_source_success(source_name: str) -> None:
-    _dynamodb.put_item(
+    # update_item (not put_item) so last_failure_at/failure_count survive a
+    # success instead of being silently dropped by a full-item overwrite.
+    _dynamodb.update_item(
         TableName=SOURCE_HEALTH_TABLE,
-        Item={
-            "source_name": {"S": source_name},
-            "last_success_at": {"N": str(int(time.time()))},
-            "consecutive_failures": {"N": "0"},
-            "alerted": {"BOOL": False},
+        Key={"source_name": {"S": source_name}},
+        UpdateExpression="SET last_success_at = :now, consecutive_failures = :zero, alerted = :false ADD success_count :one",
+        ExpressionAttributeValues={
+            ":now": {"N": str(int(time.time()))},
+            ":zero": {"N": "0"},
+            ":false": {"BOOL": False},
+            ":one": {"N": "1"},
         },
     )
 
@@ -315,7 +328,8 @@ def record_source_failure(source_name: str) -> int:
         Key={"source_name": {"S": source_name}},
         UpdateExpression=(
             "SET last_failure_at = :now, "
-            "consecutive_failures = if_not_exists(consecutive_failures, :zero) + :one"
+            "consecutive_failures = if_not_exists(consecutive_failures, :zero) + :one "
+            "ADD failure_count :one"
         ),
         ExpressionAttributeValues={":now": {"N": str(int(time.time()))}, ":zero": {"N": "0"}, ":one": {"N": "1"}},
         ReturnValues="UPDATED_NEW",
@@ -349,6 +363,18 @@ def list_source_health() -> list[dict[str, Any]]:
     return [_unwrap_item(item) for item in response.get("Items", [])]
 
 
+def get_classifier_model() -> str:
+    response = _dynamodb.get_item(TableName=SETTINGS_TABLE, Key={"setting_name": {"S": "classifier_model"}})
+    item = response.get("Item")
+    return str(item["value"]["S"]) if item and "value" in item else DEFAULT_CLASSIFIER_MODEL
+
+
+def save_classifier_model(model: str) -> None:
+    _dynamodb.put_item(
+        TableName=SETTINGS_TABLE, Item={"setting_name": {"S": "classifier_model"}, "value": {"S": model}}
+    )
+
+
 def load_user_profile(user_id: str) -> dict[str, Any]:
     response = _dynamodb.get_item(TableName=USER_PROFILE_TABLE, Key={"user_id": {"S": user_id}})
     item = response.get("Item")
@@ -356,14 +382,17 @@ def load_user_profile(user_id: str) -> dict[str, Any]:
 
 
 def save_user_profile(
-    user_id: str, *, resume_text: str, resume_filename: str, resume_url: str | None = None
+    user_id: str, *, resume_filename: str, resume_text: str | None = None, resume_url: str | None = None
 ) -> None:
+    """Exactly one of resume_text (uploaded file, cached) or resume_url (live
+    URL, fetched fresh by every caller - never cached here) should be set."""
     item: dict[str, Any] = {
         "user_id": user_id,
-        "resume_text": resume_text,
         "resume_filename": resume_filename,
         "resume_uploaded_at": int(time.time()),
     }
+    if resume_text:
+        item["resume_text"] = resume_text
     if resume_url:
         item["resume_url"] = resume_url
     _dynamodb.put_item(TableName=USER_PROFILE_TABLE, Item=_wrap_item(item))
