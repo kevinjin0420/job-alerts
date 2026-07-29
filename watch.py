@@ -3,13 +3,17 @@ from __future__ import annotations
 
 import os
 import sys
+import time
 
 from classifier import ClassificationResult, ClassifierError, is_good_fit
 from notifiers import NotificationError, notify, notify_message
 from sources import Listing, Source, build_sources
+from sources.ashby import AshbySource
 from sources.direct import DirectSource
+from sources.zyte import ZyteSource
 from users import (
     current_month_usage,
+    get_source_last_success,
     has_notified_quota,
     increment_usage,
     is_source_alerted,
@@ -30,6 +34,13 @@ DEFAULT_JOB_TYPES = ["intern"]
 MONTHLY_CLASSIFIER_CALL_CAP = 300
 SOURCE_FAILURE_ALERT_THRESHOLD = 3
 JOB_TYPE_URL_FIELDS = {"intern": "intern_url", "newgrad": "newgrad_url", "fulltime": "fulltime_url"}
+ZYTE_FETCH_INTERVAL_SECONDS = 6 * 60 * 60
+# ponytail: Zyte is billed per request, unlike every other source kind - gate it
+# to a 6h cadence here (at source-selection time, not inside ZyteSource itself)
+# rather than giving it its own CloudWatch schedule. This piggybacks on the
+# existing source-health table's last_success_at instead of a new field/table;
+# that only works because a gated-out ZyteSource is never constructed at all,
+# so record_source_success() is never called for it except on a real fetch.
 
 
 def _string_list(config: dict[str, object], key: str) -> list[str]:
@@ -59,21 +70,31 @@ def build_company_catalog() -> dict[str, dict[str, object]]:
     return {str(entry["company_name"]).strip().lower(): entry for entry in list_companies()}
 
 
+FLAT_CATALOG_KINDS = {"apple", "google"}
+
+
 def resolve_source_specs(
     base_specs: list[str], companies: list[str], catalog: dict[str, dict[str, object]]
 ) -> list[str]:
-    """Auto-adds a greenhouse source for each selected company that the admin
-    catalog has a board token for, so users just pick companies - no need to
-    hand-type raw 'greenhouse:Name:token' spec strings."""
+    """Auto-adds a source for each selected company the admin catalog maps to
+    one - a greenhouse board token, or a dedicated scraper like apple/google -
+    so users just pick companies, no hand-typed spec strings. Apple/Google
+    aren't parameterized by job_type (their scrapers take no arguments), so
+    they're resolved here rather than through build_job_type_sources."""
     specs = list(base_specs)
     for company in companies:
         entry = catalog.get(company.strip().lower())
-        if entry and entry.get("source_kind") == "greenhouse" and entry.get("board_token"):
+        if not entry:
+            continue
+        kind = entry.get("source_kind")
+        if kind == "greenhouse" and entry.get("board_token"):
             specs.append(f"greenhouse:{entry['company_name']}:{entry['board_token']}")
+        elif kind in FLAT_CATALOG_KINDS:
+            specs.append(str(kind))
     return specs
 
 
-def resolve_direct_pairs(config: dict[str, object]) -> set[tuple[str, str]]:
+def resolve_job_type_pairs(config: dict[str, object]) -> set[tuple[str, str]]:
     """(company, job_type) pairs this config actually wants - not a blind cross
     product of all companies x all job types, so a shared fetch across users
     never scrapes a combination nobody asked for."""
@@ -82,18 +103,34 @@ def resolve_direct_pairs(config: dict[str, object]) -> set[tuple[str, str]]:
     return {(company, job_type) for company in companies for job_type in job_types}
 
 
-def build_direct_sources(
+def build_job_type_sources(
     pairs: set[tuple[str, str]], catalog: dict[str, dict[str, object]]
-) -> list[DirectSource]:
-    direct_sources: list[DirectSource] = []
+) -> list[Source]:
+    """Sources resolved per (company, job_type) from the catalog, rather than
+    a flat spec string - covers any source kind whose fetch target depends on
+    which job type is being asked for."""
+    sources: list[Source] = []
     for company, job_type in pairs:
         entry = catalog.get(company.strip().lower())
-        if not entry or entry.get("source_kind") != "direct":
+        if not entry:
             continue
-        url = entry.get(JOB_TYPE_URL_FIELDS.get(job_type, ""))
-        if url:
-            direct_sources.append(DirectSource(str(entry["company_name"]), str(url), job_type))
-    return direct_sources
+        kind = entry.get("source_kind")
+        if kind == "direct":
+            url = entry.get(JOB_TYPE_URL_FIELDS.get(job_type, ""))
+            if url:
+                sources.append(DirectSource(str(entry["company_name"]), str(url), job_type))
+        elif kind == "ashby":
+            board_name = entry.get("board_name")
+            if board_name:
+                sources.append(AshbySource(str(entry["company_name"]), str(board_name), job_type))
+        elif kind == "zyte":
+            url = entry.get(JOB_TYPE_URL_FIELDS.get(job_type, ""))
+            if url:
+                source = ZyteSource(str(entry["company_name"]), str(url), job_type)
+                last_success = get_source_last_success(source.name)
+                if last_success is None or time.time() - last_success >= ZYTE_FETCH_INTERVAL_SECONDS:
+                    sources.append(source)
+    return sources
 
 
 def classifier_enabled(openrouter_api_key: str | None, fit_prompt: str) -> bool:
@@ -183,7 +220,7 @@ def process_user(
     except ValueError as error:
         print(f"User {user_id}: invalid enabled_sources configuration: {error}", file=sys.stderr)
         return 0, 0, 0, False
-    user_sources.extend(build_direct_sources(resolve_direct_pairs(config), catalog))
+    user_sources.extend(build_job_type_sources(resolve_job_type_pairs(config), catalog))
     user_source_names = {source.name for source in user_sources}
 
     user_listings = [
@@ -272,19 +309,19 @@ def main() -> int:
     user_configs = {str(user["user_id"]): load_user_config(str(user["user_id"])) for user in active_users}
     all_source_specs: set[str] = set()
     all_companies: set[str] = set()
-    all_direct_pairs: set[tuple[str, str]] = set()
+    all_job_type_pairs: set[tuple[str, str]] = set()
     for config in user_configs.values():
         companies = get_target_companies(config)
         all_companies.update(companies)
         all_source_specs.update(resolve_source_specs(get_enabled_source_specs(config), companies, catalog))
-        all_direct_pairs.update(resolve_direct_pairs(config))
+        all_job_type_pairs.update(resolve_job_type_pairs(config))
 
     try:
         shared_sources: list[Source] = build_sources(sorted(all_source_specs), sorted(all_companies))
     except ValueError as error:
         print(f"Invalid enabled_sources configuration across users: {error}", file=sys.stderr)
         return 1
-    shared_sources.extend(build_direct_sources(all_direct_pairs, catalog))
+    shared_sources.extend(build_job_type_sources(all_job_type_pairs, catalog))
 
     all_listings, newly_unhealthy_sources = fetch_all_listings(shared_sources)
     if newly_unhealthy_sources:

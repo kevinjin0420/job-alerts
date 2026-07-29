@@ -83,7 +83,9 @@
         <select id="new-company-kind" class="rounded-sm border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm">
           <option value="community">Community filter only</option>
           <option value="greenhouse">Greenhouse-backed</option>
+          <option value="ashby">Ashby-backed</option>
           <option value="direct">Direct scrape (own careers site)</option>
+          <option value="zyte">Zyte-backed (paid, anti-bot bypass)</option>
         </select>
         <button id="add-company-btn"
           class="rounded-sm bg-neutral-900 hover:bg-neutral-700 dark:bg-neutral-100 dark:hover:bg-neutral-300 text-white dark:text-neutral-900 text-sm font-medium px-3 py-1.5">
@@ -91,6 +93,8 @@
         </button>
       </div>
       <input type="text" id="new-company-token" placeholder="Greenhouse board token"
+        class="hidden w-full mb-3 rounded-sm border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-neutral-500">
+      <input type="text" id="new-company-board-name" placeholder="Ashby board name (from jobs.ashbyhq.com/<board-name>)"
         class="hidden w-full mb-3 rounded-sm border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-neutral-500">
       <div id="new-company-direct-fields" class="hidden grid sm:grid-cols-3 gap-3 mb-3">
         <input type="text" id="new-company-intern-url" placeholder="Intern listings URL"
@@ -277,7 +281,8 @@ async function removeUser(userId) {
 document.getElementById("new-company-kind").addEventListener("change", (event) => {
   const kind = event.target.value;
   document.getElementById("new-company-token").classList.toggle("hidden", kind !== "greenhouse");
-  document.getElementById("new-company-direct-fields").classList.toggle("hidden", kind !== "direct");
+  document.getElementById("new-company-board-name").classList.toggle("hidden", kind !== "ashby");
+  document.getElementById("new-company-direct-fields").classList.toggle("hidden", kind !== "direct" && kind !== "zyte");
 });
 
 document.getElementById("add-company-btn").addEventListener("click", async () => {
@@ -295,6 +300,7 @@ document.getElementById("add-company-btn").addEventListener("click", async () =>
         company_name: name,
         source_kind: sourceKind,
         board_token: document.getElementById("new-company-token").value.trim(),
+        board_name: document.getElementById("new-company-board-name").value.trim(),
         intern_url: document.getElementById("new-company-intern-url").value.trim(),
         newgrad_url: document.getElementById("new-company-newgrad-url").value.trim(),
         fulltime_url: document.getElementById("new-company-fulltime-url").value.trim(),
@@ -303,6 +309,7 @@ document.getElementById("add-company-btn").addEventListener("click", async () =>
     status.textContent = `Added ${name}`;
     nameInput.value = "";
     document.getElementById("new-company-token").value = "";
+    document.getElementById("new-company-board-name").value = "";
     document.getElementById("new-company-intern-url").value = "";
     document.getElementById("new-company-newgrad-url").value = "";
     document.getElementById("new-company-fulltime-url").value = "";
@@ -352,7 +359,7 @@ async function loadCompanies() {
       <td class="px-3 py-2">${company.company_name}</td>
       <td class="px-3 py-2">${company.source_kind}</td>
       <td class="px-3 py-2 text-neutral-500 dark:text-neutral-500">${jobTypes || "-"}</td>
-      <td class="px-3 py-2 font-mono text-xs text-neutral-500 dark:text-neutral-500">${company.board_token || "-"}</td>
+      <td class="px-3 py-2 font-mono text-xs text-neutral-500 dark:text-neutral-500">${company.board_token || company.board_name || "-"}</td>
       <td class="px-3 py-2 text-right"></td>
     `;
     const removeBtn = document.createElement("button");

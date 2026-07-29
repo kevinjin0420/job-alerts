@@ -30,7 +30,10 @@ class DirectSource:
 
     def fetch(self) -> list[Listing]:
         markdown = fetch_url(
-            self.name, f"{JINA_READER_URL}{self._url}", timeout=REQUEST_TIMEOUT_SECONDS
+            self.name,
+            f"{JINA_READER_URL}{self._url}",
+            headers={"User-Agent": "job-alerts-watcher"},
+            timeout=REQUEST_TIMEOUT_SECONDS,
         ).decode("utf-8", errors="replace")
 
         matches: list[Listing] = []

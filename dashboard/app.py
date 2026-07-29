@@ -244,6 +244,7 @@ def _handle_admin(method: str, path: str, event: dict[str, Any], admin_user_id: 
             source_kind,
             admin_user_id,
             board_token=str(body.get("board_token", "")).strip() or None,
+            board_name=str(body.get("board_name", "")).strip() or None,
             intern_url=str(body.get("intern_url", "")).strip() or None,
             newgrad_url=str(body.get("newgrad_url", "")).strip() or None,
             fulltime_url=str(body.get("fulltime_url", "")).strip() or None,

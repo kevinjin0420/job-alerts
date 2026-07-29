@@ -265,6 +265,7 @@ def save_company(
     added_by: str,
     *,
     board_token: str | None = None,
+    board_name: str | None = None,
     intern_url: str | None = None,
     newgrad_url: str | None = None,
     fulltime_url: str | None = None,
@@ -277,6 +278,7 @@ def save_company(
     }
     for key, value in (
         ("board_token", board_token),
+        ("board_name", board_name),
         ("intern_url", intern_url),
         ("newgrad_url", newgrad_url),
         ("fulltime_url", fulltime_url),
@@ -315,6 +317,12 @@ def record_source_failure(source_name: str) -> int:
         ReturnValues="UPDATED_NEW",
     )
     return int(response["Attributes"]["consecutive_failures"]["N"])
+
+
+def get_source_last_success(source_name: str) -> int | None:
+    response = _dynamodb.get_item(TableName=SOURCE_HEALTH_TABLE, Key={"source_name": {"S": source_name}})
+    item = response.get("Item")
+    return int(item["last_success_at"]["N"]) if item and "last_success_at" in item else None
 
 
 def is_source_alerted(source_name: str) -> bool:

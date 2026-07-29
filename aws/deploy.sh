@@ -89,12 +89,14 @@ cp -r "${REPO_ROOT}/sources" "${STAGE_DIR}/sources"
 echo "==> Writing Lambda environment config"
 ENV_JSON="${STAGE_DIR}/env.json"
 STATE_BUCKET="${BUCKET}" NTFY_TOPIC="${NTFY_TOPIC}" SMTP_USER="${SMTP_USER}" \
-  SMTP_PASS="${SMTP_PASS}" OPENROUTER_API_KEY="${OPENROUTER_API_KEY:-}" python3 -c '
+  SMTP_PASS="${SMTP_PASS}" OPENROUTER_API_KEY="${OPENROUTER_API_KEY:-}" ZYTE_API_KEY="${ZYTE_API_KEY:-}" python3 -c '
 import json, os, sys
 required_keys = ["STATE_BUCKET", "NTFY_TOPIC", "SMTP_USER", "SMTP_PASS"]
 variables = {k: os.environ[k] for k in required_keys}
 if os.environ.get("OPENROUTER_API_KEY"):
     variables["OPENROUTER_API_KEY"] = os.environ["OPENROUTER_API_KEY"]
+if os.environ.get("ZYTE_API_KEY"):
+    variables["ZYTE_API_KEY"] = os.environ["ZYTE_API_KEY"]
 json.dump({"Variables": variables}, sys.stdout)
 ' > "${ENV_JSON}"
 
