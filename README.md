@@ -10,4 +10,4 @@ An LLM classifier screens every listing against your criteria and optionally you
 
 Hosted on AWS using Lambda and DynamoDB, with control panel at [jobs.kevinjin.dev](https://jobs.kevinjin.dev).
 
-If you know me well enough, ask me and I'll add you to the list.
+If you want in and know me well enough, ask me and I'll add you to the list.
