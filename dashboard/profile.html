@@ -77,6 +77,10 @@ __SIDEBAR__
               class="rounded-none bg-neutral-900 hover:opacity-50 dark:bg-neutral-100 text-white dark:text-neutral-900 text-sm font-medium px-3 py-1.5">
               Save
             </button>
+            <button id="test-ntfy-topic-btn"
+              class="rounded-none border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-900 text-sm font-medium px-3 py-1.5">
+              Send test
+            </button>
           </div>
           <p id="ntfy-topic-status" class="mt-2 text-sm text-neutral-500 dark:text-neutral-500"></p>
         </div>
@@ -142,6 +146,36 @@ __SIDEBAR__
         </div>
       </div>
     </div>
+
+    <div class="mt-6 grid lg:grid-cols-2 gap-6">
+      <div class="border border-red-200 dark:border-red-900 bg-white dark:bg-neutral-900 p-3">
+        <label class="block text-xs font-medium uppercase tracking-wide text-red-600 dark:text-red-400 mb-2">Danger zone</label>
+
+        <div class="flex items-center justify-between gap-6 py-2 border-b border-neutral-100 dark:border-neutral-900">
+          <div>
+            <p class="text-sm font-medium">Pause notifications</p>
+            <p class="text-sm text-neutral-500 dark:text-neutral-500">Stops scans and notifications for you without deleting anything. Resume anytime.</p>
+          </div>
+          <button id="pause-toggle-btn"
+            class="shrink-0 rounded-none border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-900 text-sm font-medium px-3 py-1.5">
+            Pause
+          </button>
+        </div>
+
+        <div class="flex items-center justify-between gap-6 py-2">
+          <div>
+            <p class="text-sm font-medium">Delete account</p>
+            <p class="text-sm text-neutral-500 dark:text-neutral-500">Permanently deletes your account, config, resume, and listing history. Cannot be undone.</p>
+          </div>
+          <button id="delete-account-btn"
+            class="shrink-0 rounded-none border border-red-200 dark:border-red-900 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950 text-sm font-medium px-3 py-1.5">
+            Delete account
+          </button>
+        </div>
+
+        <p id="danger-zone-status" class="mt-2 text-sm text-neutral-500 dark:text-neutral-500"></p>
+      </div>
+    </div>
   </main>
 </div>
 
@@ -151,15 +185,57 @@ async function showApp() {
   showAppShell();
   await setupNav();
   loadEmailConfig();
-  loadNtfyTopic();
+  loadAccountStatus();
   loadProfile();
 }
 
-async function loadNtfyTopic() {
+let accountActive = true;
+
+function updatePauseButton() {
+  document.getElementById("pause-toggle-btn").textContent = accountActive ? "Pause" : "Resume";
+}
+
+async function loadAccountStatus() {
   const response = await apiFetch("/api/me");
   const me = await response.json();
   document.getElementById("ntfy-topic").value = me.ntfy_topic || "";
+  accountActive = me.active !== false;
+  updatePauseButton();
 }
+
+document.getElementById("pause-toggle-btn").addEventListener("click", async () => {
+  const status = document.getElementById("danger-zone-status");
+  const btn = document.getElementById("pause-toggle-btn");
+  btn.disabled = true;
+  status.textContent = accountActive ? "Pausing…" : "Resuming…";
+  try {
+    await apiFetch(accountActive ? "/api/me/unsubscribe" : "/api/me/resubscribe", { method: "POST" });
+    accountActive = !accountActive;
+    updatePauseButton();
+    status.textContent = accountActive ? "Resumed - scans will include you again" : "Paused - no scans or notifications until you resume";
+  } catch (error) {
+    status.textContent = "Failed to update";
+  }
+  btn.disabled = false;
+});
+
+document.getElementById("delete-account-btn").addEventListener("click", async () => {
+  if (!confirm("Delete your account? This permanently removes your config, resume, and listing history. This cannot be undone.")) return;
+  const status = document.getElementById("danger-zone-status");
+  status.textContent = "Deleting…";
+  try {
+    const response = await apiFetch("/api/me", { method: "DELETE" });
+    const data = await response.json();
+    if (!response.ok) {
+      status.textContent = data.error || "Failed to delete account";
+      return;
+    }
+    localStorage.removeItem(TOKEN_STORAGE);
+    showGate();
+  } catch (error) {
+    status.textContent = "Failed to delete account";
+  }
+});
 
 document.getElementById("save-ntfy-topic-btn").addEventListener("click", async () => {
   const status = document.getElementById("ntfy-topic-status");
@@ -185,6 +261,28 @@ document.getElementById("save-ntfy-topic-btn").addEventListener("click", async (
     status.textContent = "Failed to save";
   }
   setTimeout(() => { status.textContent = ""; }, 3000);
+});
+
+document.getElementById("test-ntfy-topic-btn").addEventListener("click", async () => {
+  const status = document.getElementById("ntfy-topic-status");
+  const ntfy_topic = document.getElementById("ntfy-topic").value.trim();
+  if (!ntfy_topic) {
+    status.textContent = "Enter a topic first";
+    return;
+  }
+  status.textContent = "Sending test…";
+  try {
+    const response = await apiFetch("/api/me/test-notification", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ntfy_topic }),
+    });
+    const data = await response.json();
+    status.textContent = response.ok ? "Sent - check your ntfy app" : (data.error || "Failed to send");
+  } catch (error) {
+    status.textContent = "Failed to send";
+  }
+  setTimeout(() => { status.textContent = ""; }, 5000);
 });
 
 document.getElementById("generate-api-key-btn").addEventListener("click", async () => {

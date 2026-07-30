@@ -12,10 +12,7 @@ from sources.base import Listing
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 REQUEST_TIMEOUT_SECONDS = 30
 
-# Fixed wrapper around the user's fit_prompt - kept out of fit_prompt itself so users
-# only write their actual criteria, not persona/formatting boilerplate that would just
-# duplicate this. app.py exposes these verbatim via GET /api/config so the frontend can
-# render the exact prompt being sent, with the user's criteria textarea inline.
+# Kept out of fit_prompt so users write only criteria - app.py exposes these via GET /api/config for an exact-prompt preview.
 FIT_SYSTEM_PREAMBLE = (
     "You are screening job postings for a candidate against their fit criteria below. "
     "Answer true only if the listing clearly satisfies every criterion; if anything is "
@@ -48,14 +45,10 @@ def _call_openrouter(
     user_content: str,
     properties: dict[str, object],
     required: list[str],
+    max_attempts: int = 2,
+    request_timeout_seconds: int = REQUEST_TIMEOUT_SECONDS,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    """POSTs a structured-JSON classification request. Returns (parsed content, usage).
-
-    One retry: an empty/malformed response is usually a one-off provider hiccup
-    (reasoning-heavy models sometimes burn their whole token budget "thinking" and
-    leave nothing for the actual JSON answer) - retrying once avoids treating a
-    transient blip as a full classifier failure (which fails open and notifies).
-    """
+    """POSTs a structured-JSON classification request; retries once by default since reasoning models occasionally return empty content. Returns (parsed content, usage)."""
     body = json.dumps(
         {
             "model": model,
@@ -92,9 +85,9 @@ def _call_openrouter(
     )
 
     last_error: Exception | None = None
-    for _ in range(2):
+    for _ in range(max_attempts):
         try:
-            with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
+            with urllib.request.urlopen(request, timeout=request_timeout_seconds) as response:
                 payload = json.loads(response.read())
         except (urllib.error.URLError, TimeoutError) as error:
             last_error = error
@@ -158,10 +151,7 @@ def check_is_job_posting(api_key: str, model: str, listing: Listing) -> tuple[bo
 
 
 def build_fit_system_prompt(fit_prompt: str, resume_text: str | None = None) -> str:
-    """Stitches the fixed wrapper and the user's criteria into the exact system content
-    sent to the classifier. Shared by is_good_fit and the /api/config preview so the UI
-    can never drift from what's actually sent.
-    """
+    """Builds the exact system content sent to the classifier - shared with the /api/config preview so the UI can't drift from what's actually sent."""
     parts = [FIT_SYSTEM_PREAMBLE, CRITERIA_LABEL, fit_prompt.strip()]
     if resume_text:
         parts.append(f"{RESUME_LABEL}\n{resume_text}")
@@ -172,7 +162,13 @@ def build_fit_system_prompt(fit_prompt: str, resume_text: str | None = None) -> 
 
 
 def is_good_fit(
-    api_key: str, model: str, fit_prompt: str, listing: Listing, resume_text: str | None = None
+    api_key: str,
+    model: str,
+    fit_prompt: str,
+    listing: Listing,
+    resume_text: str | None = None,
+    max_attempts: int = 2,
+    request_timeout_seconds: int = REQUEST_TIMEOUT_SECONDS,
 ) -> ClassificationResult:
     listing_text = (
         f"Company: {listing.company_name}\n"
@@ -195,7 +191,9 @@ def is_good_fit(
 
     system_content = build_fit_system_prompt(fit_prompt, resume_text)
 
-    parsed, usage = _call_openrouter(api_key, model, system_content, listing_text, properties, required)
+    parsed, usage = _call_openrouter(
+        api_key, model, system_content, listing_text, properties, required, max_attempts, request_timeout_seconds
+    )
     result = ClassificationResult(
         fits=bool(parsed["fits"]),
         reason=str(parsed["reason"]),

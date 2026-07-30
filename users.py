@@ -164,6 +164,16 @@ def save_ntfy_topic(user_id: str, ntfy_topic: str) -> None:
     )
 
 
+def set_user_active(user_id: str, active: bool) -> None:
+    """active=False excludes the user from list_active_users, so watch.py skips them without deleting anything."""
+    _dynamodb.update_item(
+        TableName=USERS_TABLE,
+        Key={"user_id": {"S": user_id}},
+        UpdateExpression="SET active = :a",
+        ExpressionAttributeValues={":a": {"BOOL": active}},
+    )
+
+
 def complete_onboarding(user_id: str) -> None:
     _dynamodb.update_item(
         TableName=USERS_TABLE,

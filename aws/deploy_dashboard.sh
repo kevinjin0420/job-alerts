@@ -62,7 +62,7 @@ cp "${REPO_ROOT}/dashboard/metrics.html" "${REPO_ROOT}/dashboard/config.html" "$
   "${REPO_ROOT}/dashboard/admin.html" "${REPO_ROOT}/dashboard/listings.html" "${REPO_ROOT}/dashboard/sources.html" \
   "${REPO_ROOT}/dashboard/profile.html" "${REPO_ROOT}/dashboard/onboarding.html" "${REPO_ROOT}/dashboard/shared.js" \
   "${REPO_ROOT}/dashboard/sidebar.html" "${STAGE_DIR}/"
-cp "${REPO_ROOT}/config.py" "${REPO_ROOT}/users.py" "${REPO_ROOT}/classifier.py" "${REPO_ROOT}/resume.py" "${STAGE_DIR}/"
+cp "${REPO_ROOT}/config.py" "${REPO_ROOT}/users.py" "${REPO_ROOT}/classifier.py" "${REPO_ROOT}/resume.py" "${REPO_ROOT}/notifiers.py" "${STAGE_DIR}/"
 cp -r "${REPO_ROOT}/sources" "${STAGE_DIR}/sources"
 echo "==> Installing dependencies"
 pip install --target "${STAGE_DIR}" pypdf --quiet

@@ -24,6 +24,7 @@ from classifier import (
     is_good_fit,
 )
 from config import SUPPORTED_JOB_TYPES
+from notifiers import NotificationError, send_ntfy_message
 from resume import ResumeFetchError, extract_resume_text, fetch_resume_text_from_url
 from sources.base import Listing
 from users import (
@@ -48,6 +49,7 @@ from users import (
     save_ntfy_topic,
     save_user_config,
     save_user_profile,
+    set_user_active,
 )
 
 WATCH_LOG_GROUP = "/aws/lambda/job-alerts-watch"
@@ -142,6 +144,7 @@ def handler(event: dict[str, Any], _context: object) -> dict[str, Any]:
                 "ntfy_topic": str(user.get("ntfy_topic", "")),
                 # Missing on legacy rows created before onboarding existed - treat as already done.
                 "onboarding_completed": bool(user.get("onboarding_completed", True)),
+                "active": bool(user.get("active", True)),
             },
         )
     if method == "POST" and path == "/api/onboarding/complete":
@@ -154,6 +157,31 @@ def handler(event: dict[str, Any], _context: object) -> dict[str, Any]:
             return _json_response(400, {"error": "ntfy_topic is required"})
         save_ntfy_topic(user_id, ntfy_topic)
         return _json_response(200, {"status": "saved"})
+    if method == "POST" and path == "/api/me/test-notification":
+        body = json.loads(event.get("body") or "{}")
+        ntfy_topic = str(body.get("ntfy_topic", "")).strip()
+        if not ntfy_topic:
+            return _json_response(400, {"error": "ntfy_topic is required"})
+        try:
+            send_ntfy_message(ntfy_topic, "job-alerts test", "If you can see this, your ntfy topic is set up correctly.")
+        except NotificationError as error:
+            return _json_response(502, {"error": str(error)})
+        return _json_response(200, {"status": "sent"})
+    if method == "POST" and path == "/api/me/unsubscribe":
+        set_user_active(user_id, False)
+        return _json_response(200, {"status": "unsubscribed"})
+    if method == "POST" and path == "/api/me/resubscribe":
+        set_user_active(user_id, True)
+        return _json_response(200, {"status": "resubscribed"})
+    if method == "DELETE" and path == "/api/me":
+        if is_admin:
+            return _json_response(400, {"error": "admins can't delete their own account here - ask another admin"})
+        try:
+            cognito_client.admin_delete_user(UserPoolId=USER_POOL_ID, Username=user_id)
+        except ClientError:
+            pass  # already gone from Cognito - still clean up our own tables
+        delete_user(user_id)
+        return _json_response(200, {"status": "deleted"})
     if method == "GET" and path == "/api/options":
         company_names = [str(entry["company_name"]) for entry in list_companies()]
         return _json_response(
@@ -231,7 +259,12 @@ def _handle_test_classifier(user_id: str, body: dict[str, Any]) -> dict[str, Any
     )
     resume_text = _resolve_resume_text(load_user_profile(user_id))
     try:
-        result = is_good_fit(OPENROUTER_API_KEY, classifier_model, fit_prompt, sample, resume_text)
+        # Single attempt, tight per-attempt timeout: API Gateway's HTTP API has a
+        # hard, non-configurable 30s integration timeout, unlike watch.py's batch
+        # scan path (a direct Lambda invocation with no such ceiling).
+        result = is_good_fit(
+            OPENROUTER_API_KEY, classifier_model, fit_prompt, sample, resume_text, max_attempts=1, request_timeout_seconds=20
+        )
     except ClassifierError as error:
         return _json_response(502, {"error": str(error)})
     return _json_response(200, {"fits": result.fits, "reason": result.reason, "fit_score": result.fit_score})
@@ -461,7 +494,6 @@ def _record_failed_auth(source_ip: str) -> None:
             "source_ip": {"S": source_ip},
             "window_start": {"N": str(now)},
             "failed_count": {"N": "1"},
-            "expires_at": {"N": str(now + 3600)},
         },
     )
 
