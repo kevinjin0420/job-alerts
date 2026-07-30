@@ -18,6 +18,7 @@ COMPANIES_TABLE = "job-alerts-companies"
 SOURCE_HEALTH_TABLE = "job-alerts-source-health"
 USER_PROFILE_TABLE = "job-alerts-user-profile"
 SETTINGS_TABLE = "job-alerts-settings"
+LISTING_VALIDITY_TABLE = "job-alerts-listing-validity"
 DEFAULT_CLASSIFIER_MODEL = "qwen/qwen3.6-flash"
 
 _dynamodb = boto3.client("dynamodb")
@@ -116,6 +117,29 @@ def list_seen_listings(user_id: str, limit: int = 300) -> list[dict[str, Any]]:
 def retry_listing(user_id: str, listing_id: str) -> None:
     """Removes a listing from the seen set so the next run reclassifies it."""
     _dynamodb.delete_item(TableName=SEEN_LISTINGS_TABLE, Key={"user_id": {"S": user_id}, "listing_id": {"S": listing_id}})
+
+
+def get_listing_validity(listing_id: str) -> dict[str, Any] | None:
+    """Whether a listing is a real job posting vs. scraped page furniture - an
+    objective fact about the listing, cached once here rather than recomputed
+    per user (see classifier.check_is_job_posting)."""
+    response = _dynamodb.get_item(TableName=LISTING_VALIDITY_TABLE, Key={"listing_id": {"S": listing_id}})
+    item = response.get("Item")
+    return _unwrap_item(item) if item else None
+
+
+def save_listing_validity(listing_id: str, *, is_job_posting: bool, reason: str) -> None:
+    _dynamodb.put_item(
+        TableName=LISTING_VALIDITY_TABLE,
+        Item=_wrap_item(
+            {
+                "listing_id": listing_id,
+                "is_job_posting": is_job_posting,
+                "reason": reason,
+                "checked_at": int(time.time()),
+            }
+        ),
+    )
 
 
 def list_all_users() -> list[dict[str, Any]]:

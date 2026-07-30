@@ -5,7 +5,7 @@ import os
 import sys
 import time
 
-from classifier import ClassificationResult, ClassifierError, is_good_fit
+from classifier import ClassificationResult, ClassifierError, check_is_job_posting, is_good_fit
 from notifiers import NotificationError, notify, notify_message
 from resume import ResumeFetchError, fetch_resume_text_from_url
 from sources import Listing, Source, build_sources
@@ -15,6 +15,7 @@ from sources.zyte import ZyteSource
 from users import (
     current_month_usage,
     get_classifier_model,
+    get_listing_validity,
     get_source_last_success,
     has_notified_quota,
     increment_usage,
@@ -30,6 +31,7 @@ from users import (
     record_listings,
     record_source_failure,
     record_source_success,
+    save_listing_validity,
 )
 
 DEFAULT_JOB_TYPES = ["intern"]
@@ -180,6 +182,35 @@ def fetch_all_listings(sources: list[Source]) -> tuple[list[Listing], list[str]]
     return all_listings, newly_unhealthy
 
 
+def resolve_listing_validity(
+    all_listings: list[Listing], openrouter_api_key: str | None, classifier_model: str
+) -> dict[str, tuple[bool, str]]:
+    """Whether each listing is a real job posting vs. scraped page furniture - checked
+    once per listing, here, at fetch time (shared across every user), rather than
+    inside each user's own fit-check call: it's an objective fact about the listing,
+    not a per-user judgment, so recomputing it per user would just waste classifier
+    calls re-deriving the same answer. Results are cached forever in DynamoDB, so a
+    listing already seen in a prior scan is a free lookup, not another LLM call."""
+    validity: dict[str, tuple[bool, str]] = {}
+    if not openrouter_api_key:
+        return validity
+    for listing in all_listings:
+        if listing.unique_id in validity:
+            continue
+        cached = get_listing_validity(listing.unique_id)
+        if cached is not None:
+            validity[listing.unique_id] = (bool(cached["is_job_posting"]), str(cached["reason"]))
+            continue
+        try:
+            is_job_posting, reason = check_is_job_posting(openrouter_api_key, classifier_model, listing)
+        except ClassifierError as error:
+            print(f"Validity check failed for {listing.company_name} - {listing.title}, assuming valid: {error}", file=sys.stderr)
+            is_job_posting, reason = True, f"validity check error, assumed valid: {error}"
+        save_listing_validity(listing.unique_id, is_job_posting=is_job_posting, reason=reason)
+        validity[listing.unique_id] = (is_job_posting, reason)
+    return validity
+
+
 def alert_admins(unhealthy_sources: list[str], smtp_user: str, smtp_pass: str) -> None:
     body = (
         f"These sources have failed {SOURCE_FAILURE_ALERT_THRESHOLD}+ runs in a row: "
@@ -224,6 +255,7 @@ def process_user(
     smtp_pass: str,
     openrouter_api_key: str | None,
     classifier_model: str,
+    listing_validity: dict[str, tuple[bool, str]],
 ) -> tuple[int, int, int, bool]:
     """Returns (new_count, notified_count, dismissed_count, had_notification_failure)."""
     user_id = str(user["user_id"])
@@ -284,6 +316,11 @@ def process_user(
         mark_quota_notified(user_id)
 
     for listing in new_listings:
+        is_job_posting, invalid_reason = listing_validity.get(listing.unique_id, (True, ""))
+        if not is_job_posting:
+            record_listings(user_id, [(listing, "invalid", invalid_reason, None)])
+            print(f"User {user_id}: not a job posting: {listing.company_name} - {listing.title} ({invalid_reason})")
+            continue
         if quota_exceeded:
             record_listings(user_id, [(listing, "dismissed", "monthly quota exceeded", None)])
             dismissed_count += 1
@@ -291,10 +328,6 @@ def process_user(
         if classifier_active:
             increment_usage(user_id)
         classification = passes_classifier(openrouter_api_key, classifier_model, fit_prompt, listing, resume_text)
-        if not classification.is_job_posting:
-            record_listings(user_id, [(listing, "invalid", classification.reason, classification.fit_score)])
-            print(f"User {user_id}: not a job posting: {listing.company_name} - {listing.title} ({classification.reason})")
-            continue
         if not classification.fits:
             record_listings(user_id, [(listing, "dismissed", classification.reason, classification.fit_score)])
             dismissed_count += 1
@@ -353,13 +386,16 @@ def main() -> int:
     if newly_unhealthy_sources:
         alert_admins(newly_unhealthy_sources, smtp_user, smtp_pass)
 
+    # Checked once here, shared across every user - see resolve_listing_validity's docstring.
+    listing_validity = resolve_listing_validity(all_listings, openrouter_api_key, classifier_model)
+
     total_new = total_notified = total_dismissed = 0
     had_notification_failure = False
     for user in active_users:
         user_id = str(user["user_id"])
         new_count, notified_count, dismissed_count, user_had_failure = process_user(
             user, user_configs[user_id], all_listings, catalog, smtp_user, smtp_pass, openrouter_api_key,
-            classifier_model,
+            classifier_model, listing_validity,
         )
         total_new += new_count
         total_notified += notified_count
