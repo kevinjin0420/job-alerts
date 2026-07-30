@@ -13,7 +13,6 @@ from sources.base import Listing
 USERS_TABLE = "job-alerts-users"
 USER_CONFIG_TABLE = "job-alerts-user-config"
 SEEN_LISTINGS_TABLE = "job-alerts-seen-listings"
-USAGE_TABLE = "job-alerts-usage"
 COMPANIES_TABLE = "job-alerts-companies"
 SOURCE_HEALTH_TABLE = "job-alerts-source-health"
 USER_PROFILE_TABLE = "job-alerts-user-profile"
@@ -33,9 +32,6 @@ def _unwrap_item(item: dict[str, Any]) -> dict[str, Any]:
 def _wrap_item(item: dict[str, Any]) -> dict[str, Any]:
     return {key: _serializer.serialize(value) for key, value in item.items()}
 
-
-def _current_year_month() -> str:
-    return time.strftime("%Y-%m", time.gmtime())
 
 
 def list_active_users() -> list[dict[str, Any]]:
@@ -219,20 +215,6 @@ def delete_user(user_id: str) -> None:
             TableName=SEEN_LISTINGS_TABLE, Key={"user_id": {"S": user_id}, "listing_id": {"S": listing_id}}
         )
 
-    kwargs: dict[str, Any] = {
-        "TableName": USAGE_TABLE,
-        "KeyConditionExpression": "user_id = :u",
-        "ExpressionAttributeValues": {":u": {"S": user_id}},
-        "ProjectionExpression": "year_month",
-    }
-    while True:
-        response = _dynamodb.query(**kwargs)
-        for item in response.get("Items", []):
-            _dynamodb.delete_item(TableName=USAGE_TABLE, Key={"user_id": {"S": user_id}, "year_month": item["year_month"]})
-        if "LastEvaluatedKey" not in response:
-            break
-        kwargs["ExclusiveStartKey"] = response["LastEvaluatedKey"]
-
 
 def generate_api_key(user_id: str) -> str:
     """Overwrites any existing key for this user, invalidating it."""
@@ -256,43 +238,6 @@ def find_user_by_api_key(token: str) -> dict[str, Any] | None:
     )
     items = response.get("Items", [])
     return _unwrap_item(items[0]) if items else None
-
-
-def current_month_usage(user_id: str) -> int:
-    response = _dynamodb.get_item(
-        TableName=USAGE_TABLE, Key={"user_id": {"S": user_id}, "year_month": {"S": _current_year_month()}}
-    )
-    item = response.get("Item")
-    return int(item["call_count"]["N"]) if item else 0
-
-
-def increment_usage(user_id: str) -> int:
-    """Increments this month's classifier-call count for the user, returns the new total."""
-    response = _dynamodb.update_item(
-        TableName=USAGE_TABLE,
-        Key={"user_id": {"S": user_id}, "year_month": {"S": _current_year_month()}},
-        UpdateExpression="SET call_count = if_not_exists(call_count, :zero) + :one",
-        ExpressionAttributeValues={":zero": {"N": "0"}, ":one": {"N": "1"}},
-        ReturnValues="UPDATED_NEW",
-    )
-    return int(response["Attributes"]["call_count"]["N"])
-
-
-def has_notified_quota(user_id: str) -> bool:
-    response = _dynamodb.get_item(
-        TableName=USAGE_TABLE, Key={"user_id": {"S": user_id}, "year_month": {"S": _current_year_month()}}
-    )
-    item = response.get("Item")
-    return bool(item["quota_notified"]["BOOL"]) if item and "quota_notified" in item else False
-
-
-def mark_quota_notified(user_id: str) -> None:
-    _dynamodb.update_item(
-        TableName=USAGE_TABLE,
-        Key={"user_id": {"S": user_id}, "year_month": {"S": _current_year_month()}},
-        UpdateExpression="SET quota_notified = :true",
-        ExpressionAttributeValues={":true": {"BOOL": True}},
-    )
 
 
 def list_companies() -> list[dict[str, Any]]:

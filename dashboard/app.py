@@ -14,14 +14,21 @@ from typing import Any
 import boto3
 from botocore.exceptions import ClientError
 
-from classifier import ClassifierError, is_good_fit
+from classifier import (
+    CRITERIA_LABEL,
+    FIT_SYSTEM_PREAMBLE,
+    RESPONSE_INSTRUCTION,
+    RESPONSE_INSTRUCTION_WITH_SCORE,
+    RESUME_LABEL,
+    ClassifierError,
+    is_good_fit,
+)
 from config import SUPPORTED_JOB_TYPES
 from resume import ResumeFetchError, extract_resume_text, fetch_resume_text_from_url
 from sources.base import Listing
 from users import (
     complete_onboarding,
     create_user,
-    current_month_usage,
     delete_company,
     delete_user,
     delete_user_resume,
@@ -29,7 +36,6 @@ from users import (
     generate_api_key,
     get_classifier_model,
     get_user,
-    increment_usage,
     list_all_users,
     list_companies,
     list_seen_listings,
@@ -154,7 +160,17 @@ def handler(event: dict[str, Any], _context: object) -> dict[str, Any]:
             200, {"companies": company_names, "job_types": SUPPORTED_JOB_TYPES}
         )
     if method == "GET" and path == "/api/config":
-        return _json_response(200, load_user_config(user_id))
+        config = load_user_config(user_id)
+        profile = load_user_profile(user_id)
+        has_resume = bool(profile.get("resume_text") or profile.get("resume_url"))
+        config["prompt_preview"] = {
+            "system_preamble": FIT_SYSTEM_PREAMBLE,
+            "criteria_label": CRITERIA_LABEL,
+            "resume_label": RESUME_LABEL,
+            "has_resume": has_resume,
+            "response_instruction": RESPONSE_INSTRUCTION_WITH_SCORE if has_resume else RESPONSE_INSTRUCTION,
+        }
+        return _json_response(200, config)
     if method == "PUT" and path == "/api/config":
         # Merge onto the current item rather than overwriting it outright -
         # config.html and profile.html (email_to) both PUT here with only the
@@ -168,7 +184,7 @@ def handler(event: dict[str, Any], _context: object) -> dict[str, Any]:
             return _json_response(403, {"error": "admin only"})
         return _json_response(200, {"events": _recent_log_events()})
     if method == "GET" and path == "/api/metrics":
-        return _json_response(200, _recent_metrics(user_id))
+        return _json_response(200, _recent_metrics())
     if method == "POST" and path == "/api/apikey":
         return _json_response(200, {"api_key": generate_api_key(user_id)})
     if method == "GET" and path == "/api/listings":
@@ -214,7 +230,6 @@ def _handle_test_classifier(user_id: str, body: dict[str, Any]) -> dict[str, Any
         description=str(body.get("description", "")) or None,
     )
     resume_text = _resolve_resume_text(load_user_profile(user_id))
-    increment_usage(user_id)
     try:
         result = is_good_fit(OPENROUTER_API_KEY, classifier_model, fit_prompt, sample, resume_text)
     except ClassifierError as error:
@@ -345,7 +360,6 @@ def _handle_admin(method: str, path: str, event: dict[str, Any], admin_user_id: 
     if method == "GET" and path == "/api/admin/users":
         users = list_all_users()
         for user in users:
-            user["monthly_classifier_calls"] = current_month_usage(str(user["user_id"]))
             user.pop("api_key_hash", None)
         return _json_response(200, {"users": users})
 
@@ -507,7 +521,7 @@ def _last_invocation_time(hours: int = 1) -> str | None:
     return datetime.fromtimestamp(latest_ms / 1000, tz=timezone.utc).isoformat()
 
 
-def _recent_metrics(user_id: str, hours: int = 24) -> dict[str, Any]:
+def _recent_metrics(hours: int = 24) -> dict[str, Any]:
     end_time = time.time()
     start_time = end_time - hours * 3600
     queries = [
@@ -533,7 +547,6 @@ def _recent_metrics(user_id: str, hours: int = 24) -> dict[str, Any]:
         "last_ran": _last_invocation_time(),
         "errors_24h": latest("errors"),
         "avg_duration_ms": latest("avg_duration_ms"),
-        "classifier_calls_this_month": current_month_usage(user_id),
     }
 
 

@@ -12,6 +12,23 @@ from sources.base import Listing
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 REQUEST_TIMEOUT_SECONDS = 30
 
+# Fixed wrapper around the user's fit_prompt - kept out of fit_prompt itself so users
+# only write their actual criteria, not persona/formatting boilerplate that would just
+# duplicate this. app.py exposes these verbatim via GET /api/config so the frontend can
+# render the exact prompt being sent, with the user's criteria textarea inline.
+FIT_SYSTEM_PREAMBLE = (
+    "You are screening job postings for a candidate against their fit criteria below. "
+    "Answer true only if the listing clearly satisfies every criterion; if anything is "
+    "unclear or unmet, answer false."
+)
+CRITERIA_LABEL = "Candidate's fit criteria:"
+RESUME_LABEL = "Candidate resume:"
+RESPONSE_INSTRUCTION = 'Respond with a JSON object: {"fits": true or false, "reason": "one short sentence explaining why"}.'
+RESPONSE_INSTRUCTION_WITH_SCORE = (
+    'Respond with a JSON object: {"fits": true or false, "reason": "one short sentence explaining why", '
+    '"fit_score": integer from 0 to 100 rating how well the resume matches this listing}.'
+)
+
 
 class ClassifierError(Exception):
     pass
@@ -140,6 +157,20 @@ def check_is_job_posting(api_key: str, model: str, listing: Listing) -> tuple[bo
     return is_job_posting, reason
 
 
+def build_fit_system_prompt(fit_prompt: str, resume_text: str | None = None) -> str:
+    """Stitches the fixed wrapper and the user's criteria into the exact system content
+    sent to the classifier. Shared by is_good_fit and the /api/config preview so the UI
+    can never drift from what's actually sent.
+    """
+    parts = [FIT_SYSTEM_PREAMBLE, CRITERIA_LABEL, fit_prompt.strip()]
+    if resume_text:
+        parts.append(f"{RESUME_LABEL}\n{resume_text}")
+        parts.append(RESPONSE_INSTRUCTION_WITH_SCORE)
+    else:
+        parts.append(RESPONSE_INSTRUCTION)
+    return "\n\n".join(parts)
+
+
 def is_good_fit(
     api_key: str, model: str, fit_prompt: str, listing: Listing, resume_text: str | None = None
 ) -> ClassificationResult:
@@ -152,8 +183,6 @@ def is_good_fit(
 
     properties: dict[str, object] = {"fits": {"type": "boolean"}, "reason": {"type": "string"}}
     required = ["fits", "reason"]
-    response_instruction = 'Respond with a JSON object: {"fits": true or false, "reason": "one short sentence explaining why"}.'
-    system_content = f"{fit_prompt}\n\n{response_instruction}"
 
     # fit_score only makes sense when there's a resume to score the listing
     # against - without one, ask for the same fits/reason shape as always.
@@ -163,11 +192,8 @@ def is_good_fit(
             "description": "0-100 score for how well the candidate's resume matches this listing",
         }
         required.append("fit_score")
-        response_instruction = (
-            'Respond with a JSON object: {"fits": true or false, "reason": "one short sentence explaining why", '
-            '"fit_score": integer from 0 to 100 rating how well the resume matches this listing}.'
-        )
-        system_content = f"{fit_prompt}\n\nCandidate resume:\n{resume_text}\n\n{response_instruction}"
+
+    system_content = build_fit_system_prompt(fit_prompt, resume_text)
 
     parsed, usage = _call_openrouter(api_key, model, system_content, listing_text, properties, required)
     result = ClassificationResult(

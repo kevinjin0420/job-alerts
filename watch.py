@@ -13,12 +13,9 @@ from sources.ashby import AshbySource
 from sources.direct import DirectSource
 from sources.zyte import ZyteSource
 from users import (
-    current_month_usage,
     get_classifier_model,
     get_listing_validity,
     get_source_last_success,
-    has_notified_quota,
-    increment_usage,
     is_source_alerted,
     list_active_users,
     list_all_users,
@@ -26,7 +23,6 @@ from users import (
     load_seen_ids,
     load_user_config,
     load_user_profile,
-    mark_quota_notified,
     mark_source_alerted,
     record_listings,
     record_source_failure,
@@ -35,7 +31,6 @@ from users import (
 )
 
 DEFAULT_JOB_TYPES = ["intern"]
-MONTHLY_CLASSIFIER_CALL_CAP = 300
 SOURCE_FAILURE_ALERT_THRESHOLD = 3
 JOB_TYPE_URL_FIELDS = {"intern": "intern_url", "newgrad": "newgrad_url", "fulltime": "fulltime_url"}
 ZYTE_FETCH_INTERVAL_SECONDS = 6 * 60 * 60
@@ -295,38 +290,12 @@ def process_user(
     dismissed_count = 0
     had_notification_failure = False
 
-    classifier_active = classifier_enabled(openrouter_api_key, fit_prompt)
-    quota_exceeded = (
-        classifier_active and not user.get("is_admin") and current_month_usage(user_id) >= MONTHLY_CLASSIFIER_CALL_CAP
-    )
-    if quota_exceeded and new_listings and not has_notified_quota(user_id):
-        try:
-            notify_message(
-                ntfy_topic,
-                smtp_user,
-                smtp_pass,
-                email_recipients,
-                "job-alerts: monthly quota reached",
-                f"You've hit your {MONTHLY_CLASSIFIER_CALL_CAP} classifier-call limit for this month. "
-                "New listings won't be classified or notified until next month.",
-            )
-        except NotificationError as error:
-            had_notification_failure = True
-            print(f"User {user_id}: failed to send quota-exceeded notice: {error}", file=sys.stderr)
-        mark_quota_notified(user_id)
-
     for listing in new_listings:
         is_job_posting, invalid_reason = listing_validity.get(listing.unique_id, (True, ""))
         if not is_job_posting:
             record_listings(user_id, [(listing, "invalid", invalid_reason, None)])
             print(f"User {user_id}: not a job posting: {listing.company_name} - {listing.title} ({invalid_reason})")
             continue
-        if quota_exceeded:
-            record_listings(user_id, [(listing, "dismissed", "monthly quota exceeded", None)])
-            dismissed_count += 1
-            continue
-        if classifier_active:
-            increment_usage(user_id)
         classification = passes_classifier(openrouter_api_key, classifier_model, fit_prompt, listing, resume_text)
         if not classification.fits:
             record_listings(user_id, [(listing, "dismissed", classification.reason, classification.fit_score)])

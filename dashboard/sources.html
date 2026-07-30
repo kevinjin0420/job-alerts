@@ -158,7 +158,7 @@ document.getElementById("add-company-btn").addEventListener("click", async () =>
 function getCompanyHealthRows(company, healthSources) {
   const kind = company.source_kind;
   if (kind === "greenhouse" && company.board_token) {
-    return healthSources.filter((s) => s.source_name === `greenhouse:${company.company_name}:${company.board_token}`);
+    return healthSources.filter((s) => s.source_name === `greenhouse:${company.board_token}`);
   }
   if (kind === "ashby" && company.board_name) {
     return healthSources.filter((s) => s.source_name.startsWith(`ashby:${company.board_name}:`));
@@ -201,10 +201,9 @@ async function loadCompanies() {
   table.innerHTML = `
     <thead>
       <tr class="sticky top-0 bg-white dark:bg-neutral-900 border-b border-neutral-200 dark:border-neutral-800 text-left text-xs uppercase tracking-wide text-neutral-500 dark:text-neutral-500">
-        <th class="px-3 py-2 font-medium w-1/12">Name</th>
+        <th class="px-3 py-2 font-medium w-2/12">Name</th>
         <th class="px-3 py-2 font-medium w-1/12">Kind</th>
-        <th class="px-3 py-2 font-medium w-1/12">Job types</th>
-        <th class="px-3 py-2 font-medium w-2/12">Details</th>
+        <th class="px-3 py-2 font-medium w-2/12">Job types</th>
         <th class="px-3 py-2 font-medium w-2/12">Last success</th>
         <th class="px-3 py-2 font-medium w-2/12">Last failure</th>
         <th class="px-3 py-2 font-medium w-1/12">Success rate</th>
@@ -234,7 +233,6 @@ async function loadCompanies() {
       <td class="px-3 py-2 break-words">${company.company_name}</td>
       <td class="px-3 py-2">${company.source_kind}</td>
       <td class="px-3 py-2 text-neutral-500 dark:text-neutral-500">${jobTypes || "-"}</td>
-      <td class="px-3 py-2 break-words font-mono text-xs text-neutral-500 dark:text-neutral-500">${company.board_token || company.board_name || "-"}</td>
       <td class="px-3 py-2 font-mono text-xs text-neutral-500 dark:text-neutral-500">${lastSuccess}</td>
       <td class="px-3 py-2 font-mono text-xs text-neutral-500 dark:text-neutral-500">${lastFailure}</td>
       <td class="px-3 py-2">${neverRun ? "-" : formatSuccessRate(successCount, failureCount)}</td>

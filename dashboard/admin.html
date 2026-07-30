@@ -203,10 +203,9 @@ async function loadUsers() {
   table.innerHTML = `
     <thead>
       <tr class="sticky top-0 bg-white dark:bg-neutral-900 border-b border-neutral-200 dark:border-neutral-800 text-left text-xs uppercase tracking-wide text-neutral-500 dark:text-neutral-500">
-        <th class="px-3 py-2 font-medium w-4/12">Email</th>
+        <th class="px-3 py-2 font-medium w-5/12">Email</th>
         <th class="px-3 py-2 font-medium w-1/12">Role</th>
-        <th class="px-3 py-2 font-medium w-2/12">Calls this month</th>
-        <th class="px-3 py-2 font-medium w-3/12">ntfy topic</th>
+        <th class="px-3 py-2 font-medium w-4/12">ntfy topic</th>
         <th class="px-3 py-2 font-medium w-2/12"></th>
       </tr>
     </thead>
@@ -218,7 +217,6 @@ async function loadUsers() {
     row.innerHTML = `
       <td class="px-3 py-2 break-words font-mono">${user.user_id}</td>
       <td class="px-3 py-2">${user.is_admin ? "Admin" : "User"}</td>
-      <td class="px-3 py-2 font-mono">${user.monthly_classifier_calls}</td>
       <td class="px-3 py-2 break-words font-mono">${user.ntfy_topic || "-"}</td>
       <td class="px-3 py-2 text-right"></td>
     `;

@@ -68,7 +68,7 @@
 
     <div class="border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3">
       <label class="block text-xs font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-500 mb-2">3. Fit criteria</label>
-      <p class="text-sm text-neutral-500 dark:text-neutral-500 mb-3">Describe what makes a listing worth notifying you about - every match gets screened against this. Edit the template below to fit you.</p>
+      <p class="text-sm text-neutral-500 dark:text-neutral-500 mb-3">List the criteria a listing must meet to notify you - just the criteria, not persona or formatting instructions, those are already handled for you. Edit the template below to fit you. You can see the exact prompt this gets stitched into on the Config page.</p>
       <textarea id="fit-prompt" rows="8"
         class="w-full rounded-none border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm font-mono leading-6 focus:outline-none focus:ring-1 focus:ring-neutral-500"></textarea>
     </div>
@@ -114,13 +114,10 @@
 
 <script src="/shared.js"></script>
 <script>
-const DEFAULT_FIT_PROMPT = `Answer true only if ALL of the following hold:
-1. It is an internship position (not full-time or new-grad).
+const DEFAULT_FIT_PROMPT = `1. It is an internship position (not full-time or new-grad).
 2. It is a general software engineering role (edit this if you also want data/ML/hardware roles).
 3. It is located in the United States (remote-US counts).
-4. It is open to Bachelor's degree students.
-
-If a listing doesn't clearly satisfy a criterion, answer false.`;
+4. It is open to Bachelor's degree students.`;
 
 async function showApp() {
   showAppShell();

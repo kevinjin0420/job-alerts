@@ -62,14 +62,12 @@ __SIDEBAR__
     <div class="grid lg:grid-cols-3 gap-6 items-start">
       <div class="lg:col-span-2 flex flex-col gap-6 h-[calc(100vh-160px)]">
         <div class="border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3">
-          <label class="block text-xs font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-500 mb-2">Fit prompt</label>
-          <textarea id="fit-prompt" rows="22"
-            class="w-full rounded-none border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm font-mono leading-6 focus:outline-none focus:ring-1 focus:ring-neutral-500"></textarea>
+          <label class="block text-xs font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-500 mb-2">Prompt</label>
+          <div class="rounded-none border border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-950 p-3 font-mono text-sm leading-6"><div id="prompt-before" class="whitespace-pre-wrap text-neutral-500 dark:text-neutral-500"></div><textarea id="fit-prompt" rows="1" class="block w-full my-2 rounded-none border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-sm font-mono leading-6 resize-none overflow-hidden focus:outline-none focus:ring-1 focus:ring-neutral-500" placeholder="1. ...&#10;2. ..."></textarea><div id="prompt-after" class="whitespace-pre-wrap text-neutral-500 dark:text-neutral-500"></div></div>
         </div>
 
         <div class="flex-1 flex flex-col min-h-0 border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3">
           <label class="block text-xs font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-500 mb-2">Prompt tuner</label>
-          <p class="text-sm text-neutral-500 dark:text-neutral-500 mb-3">Test the fit prompt above (and classifier model, right) against a sample listing before saving. Uses a real classifier call - counts against your monthly quota.</p>
           <div class="grid sm:grid-cols-2 gap-3 mb-3">
             <input type="text" id="tuner-company" placeholder="Company"
               class="rounded-none border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-neutral-500">
@@ -238,6 +236,24 @@ document.getElementById("company-search").addEventListener("input", (event) => {
   }
 });
 
+function autoResizeTextarea(el) {
+  el.style.height = "auto";
+  el.style.height = `${el.scrollHeight}px`;
+}
+
+const fitPromptTextarea = document.getElementById("fit-prompt");
+fitPromptTextarea.addEventListener("input", () => autoResizeTextarea(fitPromptTextarea));
+
+function renderPromptPreview(preview) {
+  if (!preview) return;
+  document.getElementById("prompt-before").textContent = `${preview.system_preamble}\n${preview.criteria_label}`;
+  const afterLines = [];
+  if (preview.has_resume) afterLines.push(`${preview.resume_label}\n<resume text>`);
+  afterLines.push(preview.response_instruction);
+  document.getElementById("prompt-after").textContent = afterLines.join("\n");
+  autoResizeTextarea(fitPromptTextarea);
+}
+
 async function loadConfig() {
   const status = document.getElementById("status");
   status.textContent = "Loading config…";
@@ -251,6 +267,7 @@ async function loadConfig() {
     document.getElementById("fit-prompt").value = config.fit_prompt || "";
     renderCheckboxes(document.getElementById("company-checkboxes"), options.companies, config.companies || [], "company");
     renderCheckboxes(document.getElementById("job-type-checkboxes"), options.job_types, config.job_types || ["intern"], "jobtype");
+    renderPromptPreview(config.prompt_preview);
     status.textContent = "";
   } catch (error) {
     status.textContent = "Failed to load config";
