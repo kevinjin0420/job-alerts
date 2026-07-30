@@ -21,7 +21,10 @@ def extract_resume_text(pdf_bytes: bytes) -> str:
         raise ResumeFetchError("resume must be under 5MB")
     try:
         reader = PdfReader(BytesIO(pdf_bytes))
-        text = "\n".join(page.extract_text() or "" for page in reader.pages).strip()
+        # "layout" mode avoids pypdf's default mode misreading kerning gaps as word breaks
+        # (e.g. "Frameworks" -> "F rameworks"); whitespace-collapsing handles the rest.
+        raw_text = "\n".join(page.extract_text(extraction_mode="layout") or "" for page in reader.pages)
+        text = " ".join(raw_text.split())
     except Exception as error:
         raise ResumeFetchError("could not parse PDF") from error
     if not text:
