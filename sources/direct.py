@@ -7,6 +7,7 @@ from .base import Listing, fetch_url, looks_like_job_posting_url
 JINA_READER_URL = "https://r.jina.ai/"
 REQUEST_TIMEOUT_SECONDS = 30
 MARKDOWN_LINK_PATTERN = re.compile(r"(?<!!)\[([^\]]{4,})\]\((https?://[^\s\)]+)\)")
+INLINE_IMAGE_PATTERN = re.compile(r"!\[[^\]]*\]\([^)]*\)")  # stripped first - some sites nest icon images inside a job link's own bracket text (e.g. TikTok)
 MIN_TITLE_LENGTH = 4
 
 
@@ -36,11 +37,12 @@ class DirectSource:
             headers={"User-Agent": "job-alerts-watcher"},
             timeout=REQUEST_TIMEOUT_SECONDS,
         ).decode("utf-8", errors="replace")
+        markdown = INLINE_IMAGE_PATTERN.sub("", markdown)
 
         matches: list[Listing] = []
         seen_urls: set[str] = set()
         for title, link in MARKDOWN_LINK_PATTERN.findall(markdown):
-            title = title.strip()
+            title = " ".join(title.split())
             if len(title) < MIN_TITLE_LENGTH or link in seen_urls or not looks_like_job_posting_url(link):
                 continue
             seen_urls.add(link)

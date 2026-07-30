@@ -147,6 +147,33 @@ class WorkdaySourceFetchTests(unittest.TestCase):
         second_call_body = json.loads(mock_urlopen.call_args_list[1].args[0].data)
         self.assertEqual(second_call_body["appliedFacets"], {"workerSubType": ["bare-regular-id"]})
 
+    def test_intern_falls_back_to_job_family_group_when_no_worker_sub_type_facet(self) -> None:
+        # Some tenants (e.g. Workday's own site) expose no workerSubType facet at all - a "University" jobFamilyGroup is the only early-career signal.
+        university_only_facets = {
+            "total": 0,
+            "jobPostings": [],
+            "facets": [
+                {
+                    "facetParameter": "jobFamilyGroup",
+                    "descriptor": "Job Category",
+                    "values": [
+                        {"descriptor": "Product Development and Engineering", "id": "eng-id", "count": 103},
+                        {"descriptor": "University", "id": "university-id", "count": 1},
+                    ],
+                }
+            ],
+        }
+        page_response = {"total": 0, "jobPostings": []}
+        source = WorkdaySource("Example", "wd5", "example", "ExampleCareerSite", "intern")
+        with patch(
+            "sources.workday.urllib.request.urlopen",
+            side_effect=[_mock_response(university_only_facets), _mock_response(page_response)],
+        ) as mock_urlopen:
+            source.fetch()
+
+        second_call_body = json.loads(mock_urlopen.call_args_list[1].args[0].data)
+        self.assertEqual(second_call_body["appliedFacets"], {"jobFamilyGroup": ["university-id"]})
+
     def test_returns_empty_when_no_matching_worker_sub_type(self) -> None:
         source = WorkdaySource("Example", "wd5", "example", "ExampleCareerSite", "intern")
         no_intern_facets = {

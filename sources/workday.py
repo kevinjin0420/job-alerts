@@ -13,11 +13,13 @@ MAX_PAGES = 10
 
 # Facet ids are opaque and per-tenant, so matched by descriptor text on every fetch instead of hardcoded per company.
 FACET_KEYWORDS_BY_JOB_TYPE: dict[str, tuple[str, ...]] = {
-    "intern": ("intern",),
+    "intern": ("intern", "university"),
     "newgrad": ("college graduate", "new grad", "recent graduate"),
     # "Regular" alone covers tenants that don't say "Regular Employee" (e.g. Adobe).
     "fulltime": ("regular",),
 }
+# Some tenants (e.g. Workday's own site) expose no "workerSubType" facet at all - jobFamilyGroup (a "University" category) is the fallback signal there.
+FACET_PARAMETER_CANDIDATES = ("workerSubType", "jobFamilyGroup")
 
 
 class WorkdaySource:
@@ -40,31 +42,35 @@ class WorkdaySource:
         with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
             return json.loads(response.read())
 
-    def _matching_worker_sub_type_id(self) -> str | None:
+    def _matching_facet(self) -> tuple[str, str] | None:
+        """Returns (facetParameter, id) for whichever facet actually distinguishes this job_type on this tenant."""
         keywords = FACET_KEYWORDS_BY_JOB_TYPE.get(self._job_type)
         if not keywords:
             return None
         response = self._post({"appliedFacets": {}, "limit": 1, "offset": 0, "searchText": ""})
-        for facet in response.get("facets", []):
-            if facet.get("facetParameter") != "workerSubType":
+        facets_by_parameter = {facet.get("facetParameter"): facet for facet in response.get("facets", [])}
+        for parameter in FACET_PARAMETER_CANDIDATES:
+            facet = facets_by_parameter.get(parameter)
+            if not facet:
                 continue
             for value in facet.get("values", []):
                 descriptor = str(value.get("descriptor", "")).lower()
                 if any(keyword in descriptor for keyword in keywords):
-                    return str(value.get("id", ""))
+                    return parameter, str(value.get("id", ""))
         return None
 
     def fetch(self) -> list[Listing]:
-        worker_sub_type_id = self._matching_worker_sub_type_id()
-        if worker_sub_type_id is None:
+        matching_facet = self._matching_facet()
+        if matching_facet is None:
             return []
+        facet_parameter, facet_id = matching_facet
 
         matches: list[Listing] = []
         total: int | None = None
         for page in range(MAX_PAGES):
             response = self._post(
                 {
-                    "appliedFacets": {"workerSubType": [worker_sub_type_id]},
+                    "appliedFacets": {facet_parameter: [facet_id]},
                     "limit": PAGE_SIZE,
                     "offset": page * PAGE_SIZE,
                     "searchText": "",

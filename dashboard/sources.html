@@ -210,6 +210,12 @@ function sourceConfigFields(company) {
   if (kind === "amazon") {
     return [...urlFields, ["Fetched via", "https://www.amazon.jobs/en/search.json (fixed, built into the source)"]];
   }
+  if (kind === "oracle") {
+    return [...urlFields, ["Fetched via", "Oracle Recruiting Cloud API (full-text search, title-filtered)"]];
+  }
+  if (kind === "sitemap") {
+    return [...urlFields, ["Fetched via", "public sitemap.xml (titles approximated from URL slugs)"]];
+  }
   if (kind === "direct" || kind === "zyte" || kind === "apple" || kind === "google") {
     return urlFields;
   }

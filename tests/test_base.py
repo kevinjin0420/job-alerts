@@ -17,6 +17,14 @@ class LooksLikeJobPostingUrlTests(unittest.TestCase):
             )
         )
 
+    def test_matches_letter_prefixed_id_glued_to_slug(self) -> None:
+        # ASML's job URLs glue a letter-prefixed id directly onto the slug with no separator (e.g. "-j00348041").
+        self.assertTrue(
+            looks_like_job_posting_url(
+                "https://www.asml.com/en/careers/find-your-job/physics-internship-j00348041"
+            )
+        )
+
     def test_matches_with_trailing_query_string(self) -> None:
         self.assertTrue(looks_like_job_posting_url("https://boards.greenhouse.io/company/jobs/7732569?gh_src=abc"))
 

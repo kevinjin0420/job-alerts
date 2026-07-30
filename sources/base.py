@@ -6,12 +6,12 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Protocol
 
-_JOB_ID_PATTERN = re.compile(r"[/-]\d{4,}/?(?:[?#].*)?$")
+_JOB_ID_PATTERN = re.compile(r"[/-][A-Za-z]{0,3}\d{4,}/?(?:[?#].*)?$")
 INTERNSHIP_TITLE_PATTERN = re.compile(r"\bintern(s|ship)?\b", re.IGNORECASE)
 
 
 def looks_like_job_posting_url(url: str) -> bool:
-    """Heuristic for direct/zyte scrapers: real postings end in a numeric id, as its own path segment or a slug suffix (Tesla's style) - nav/footer links don't."""
+    """Heuristic for direct/zyte scrapers: real postings end in a numeric id, as its own path segment, a slug suffix (Tesla's style), or a letter-prefixed id glued on with no separator (ASML's "-j00348041") - nav/footer links don't."""
     return bool(_JOB_ID_PATTERN.search(url))
 
 

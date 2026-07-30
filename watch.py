@@ -14,6 +14,8 @@ from sources.amazon import QUERY_BY_JOB_TYPE as AMAZON_QUERY_BY_JOB_TYPE
 from sources.amazon import AmazonJobsSource
 from sources.ashby import AshbySource
 from sources.direct import DirectSource
+from sources.oracle import OracleSource
+from sources.sitemap import SitemapSource
 from sources.workday import WorkdaySource
 from sources.zyte import ZyteSource
 from users import (
@@ -156,6 +158,12 @@ def build_job_type_sources(
                 sources.append(WorkdaySource(str(entry["company_name"]), host, tenant, site, job_type))
         elif kind == "amazon" and job_type in AMAZON_QUERY_BY_JOB_TYPE:
             sources.append(AmazonJobsSource(str(entry["company_name"]), job_type))
+        elif kind == "oracle" and job_type == "intern":
+            sources.append(OracleSource(str(entry["company_name"])))
+        elif kind == "sitemap" and job_type == "intern":
+            url = entry.get("intern_url")
+            if url:
+                sources.append(SitemapSource(str(entry["company_name"]), str(url)))
     return sources
 
 
