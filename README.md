@@ -8,8 +8,6 @@ Each user configures their own companies, job types, and fit criteria
 
 An LLM classifier screens every listing against your criteria and optionally your resume before notifying you.
 
-Hosted on AWS (Lambda + DynamoDB), with control panel at [jobs.kevinjin.dev](https://jobs.kevinjin.dev).
-
-See [docs/ntfy-setup.md](docs/ntfy-setup.md) to set up notifications, or [docs/agent-skill.md](docs/agent-skill.md) if you want your own agent to manage your config.
+Hosted on AWS using Lambda and DynamoDB, with control panel at [jobs.kevinjin.dev](https://jobs.kevinjin.dev).
 
 If you know me well enough, ask me and I'll add you to the list.
