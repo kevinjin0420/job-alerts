@@ -4,7 +4,17 @@
     {
       "Sid": "MetricFilters",
       "Effect": "Allow",
-      "Action": ["logs:PutMetricFilter", "logs:DescribeMetricFilters", "logs:DescribeLogGroups", "logs:FilterLogEvents", "logs:GetLogEvents"],
+      "Action": [
+        "logs:PutMetricFilter",
+        "logs:DescribeMetricFilters",
+        "logs:DescribeLogGroups",
+        "logs:DescribeLogStreams",
+        "logs:FilterLogEvents",
+        "logs:GetLogEvents",
+        "logs:StartQuery",
+        "logs:StopQuery",
+        "logs:GetQueryResults"
+      ],
       "Resource": "arn:aws:logs:us-west-1:863516093571:log-group:/aws/lambda/job-alerts-*:*"
     },
     {

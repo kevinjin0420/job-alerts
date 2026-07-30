@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import concurrent.futures
+import json
 import os
 import sys
 import time
@@ -40,8 +41,12 @@ DEFAULT_JOB_TYPES = ["intern"]
 SOURCE_FAILURE_ALERT_THRESHOLD = 3
 JOB_TYPE_URL_FIELDS = {"intern": "intern_url", "newgrad": "newgrad_url", "fulltime": "fulltime_url"}
 ZYTE_FETCH_INTERVAL_SECONDS = 6 * 60 * 60
-# ponytail: OpenRouter calls are I/O-bound, so a thread pool turns N sequential calls into N/32 - raise further if a burst-heavy run still times out.
-CLASSIFIER_CONCURRENCY = 32
+# ponytail: OpenRouter calls are I/O-bound, so a thread pool turns N sequential calls into N/8.
+# Was 32 - free-tier models have much stricter per-minute rate limits than paid ones,
+# and 32 concurrent calls was blowing through them, causing near-constant 429s (every
+# failed call used to fail open and notify regardless of fit - see passes_classifier).
+# Raise again only alongside confirming the configured model's actual rate limit.
+CLASSIFIER_CONCURRENCY = 8
 # ponytail: Zyte is billed per request, unlike every other source kind - gate it
 # to a 6h cadence here (at source-selection time, not inside ZyteSource itself)
 # rather than giving it its own CloudWatch schedule. This piggybacks on the
@@ -177,20 +182,24 @@ def passes_classifier(
     fit_prompt: str,
     listing: Listing,
     resume_text: str | None = None,
-) -> ClassificationResult:
+) -> ClassificationResult | None:
     """fits=True means "notify". Disabled (no key, no prompt, or unedited placeholder
-    prompt) and any API failure both fail open rather than silently suppressing
-    a real listing."""
+    prompt) fails open, since there's nothing to check against. An API failure
+    returns None ("couldn't classify this run") rather than failing open -
+    failing open used to notify on every affected listing regardless of fit,
+    which under a sustained failure (e.g. OpenRouter rate-limiting a whole batch
+    under high concurrency) turned into notifying on everything, unfiltered.
+    None leaves the listing out of seen_ids, so it's just reclassified next run."""
     if not classifier_enabled(openrouter_api_key, fit_prompt):
         return ClassificationResult(fits=True, reason="classifier disabled")
     try:
         return is_good_fit(openrouter_api_key, classifier_model, fit_prompt, listing, resume_text)
     except ClassifierError as error:
         print(
-            f"Classifier failed for {listing.company_name} - {listing.title}, notifying anyway: {error}",
+            f"Classifier failed for {listing.company_name} - {listing.title}, will retry next run: {error}",
             file=sys.stderr,
         )
-        return ClassificationResult(fits=True, reason=f"classifier error, notified anyway: {error}")
+        return None
 
 
 def fetch_all_listings(sources: list[Source]) -> tuple[list[Listing], list[str]]:
@@ -247,6 +256,10 @@ def resolve_listing_validity(
             validity[listing.unique_id] = (bool(cached["is_job_posting"]), str(cached["reason"]))
         else:
             uncached.append(listing)
+
+    # Structured (not the human-readable prints elsewhere) so the dashboard's metrics
+    # page can parse it out of CloudWatch Logs as a per-run backlog data point.
+    print(json.dumps({"event": "classifier_backlog", "count": len(uncached)}))
 
     if uncached:
         with concurrent.futures.ThreadPoolExecutor(max_workers=CLASSIFIER_CONCURRENCY) as executor:
@@ -348,7 +361,7 @@ def process_user(
     listings_needing_classification = [
         listing for listing in new_listings if listing_validity.get(listing.unique_id, (True, ""))[0]
     ]
-    classifications: dict[str, ClassificationResult] = {}
+    classifications: dict[str, ClassificationResult | None] = {}
     if listings_needing_classification:
         with concurrent.futures.ThreadPoolExecutor(max_workers=CLASSIFIER_CONCURRENCY) as executor:
             futures = {
@@ -361,17 +374,29 @@ def process_user(
                 listing = futures[future]
                 classifications[listing.unique_id] = future.result()
 
+    # Two distinct stages, named explicitly so logs/reasons never leave it ambiguous
+    # which one ruled on a listing: the validator (check_is_job_posting, shared
+    # across users) confirms it's a real posting at all; the classifier (is_good_fit,
+    # per user) then checks it against this user's fit criteria. Both get their
+    # model name appended to the stored/printed reason, so switching models (e.g.
+    # to a free Gemma model) is directly visible on the Listings page, not just
+    # in the structured CloudWatch-only log lines.
     for listing in new_listings:
         is_job_posting, invalid_reason = listing_validity.get(listing.unique_id, (True, ""))
         if not is_job_posting:
-            record_listings(user_id, [(listing, "invalid", invalid_reason, None)])
-            print(f"User {user_id}: not a job posting: {listing.company_name} - {listing.title} ({invalid_reason})")
+            annotated_reason = f"{invalid_reason} (validator: {classifier_model})"
+            record_listings(user_id, [(listing, "invalid", annotated_reason, None)])
+            print(f"User {user_id}: validator rejected: {listing.company_name} - {listing.title} ({annotated_reason})")
             continue
         classification = classifications[listing.unique_id]
+        if classification is None:
+            continue  # transient/systemic classifier failure - stays unseen, retried next run
+
         if not classification.fits:
-            record_listings(user_id, [(listing, "dismissed", classification.reason, classification.fit_score)])
+            annotated_reason = f"{classification.reason} (classifier: {classifier_model})"
+            record_listings(user_id, [(listing, "dismissed", annotated_reason, classification.fit_score)])
             dismissed_count += 1
-            print(f"User {user_id}: classifier dismissed: {listing.company_name} - {listing.title} ({classification.reason})")
+            print(f"User {user_id}: classifier dismissed: {listing.company_name} - {listing.title} ({annotated_reason})")
             continue
         try:
             notify(ntfy_topic, smtp_user, smtp_pass, email_recipients, listing)
@@ -383,7 +408,8 @@ def process_user(
             )
             # Not recorded - retried next run, since the notification itself never went out.
             continue
-        record_listings(user_id, [(listing, "notified", classification.reason, classification.fit_score)])
+        annotated_reason = f"{classification.reason} (classifier: {classifier_model})"
+        record_listings(user_id, [(listing, "notified", annotated_reason, classification.fit_score)])
         notified_count += 1
         print(f"User {user_id}: notified: {listing.company_name} - {listing.title}")
 
@@ -446,6 +472,13 @@ def main() -> int:
         f"Scan complete: {len(active_users)} user(s), {total_new} new, {total_notified} notified, "
         f"{total_dismissed} dismissed by classifier"
     )
+    print(json.dumps({
+        "event": "scan_summary",
+        "users": len(active_users),
+        "new": total_new,
+        "notified": total_notified,
+        "dismissed": total_dismissed,
+    }))
     return 1 if had_notification_failure else 0
 
 

@@ -71,10 +71,15 @@ def _call_openrouter(
                     },
                 },
             },
-            # Low reasoning effort: these are short yes/no classifications, not tasks
-            # that need deep chain-of-thought.
-            "reasoning": {"effort": "low"},
-            "max_tokens": 600,
+            # A hard token cap, not "effort": "low" - some models (e.g. qwen3.6-flash)
+            # ignore effort and reason at length regardless, blowing through max_tokens
+            # before ever emitting the JSON content and returning empty/malformed
+            # output on every call - a systematic failure, not the rare transient one
+            # the retry above exists for, so every listing was failing open and
+            # getting notified regardless of fit. max_tokens leaves headroom above
+            # the reasoning cap for the actual JSON content.
+            "reasoning": {"max_tokens": 150},
+            "max_tokens": 1000,
         }
     ).encode("utf-8")
     request = urllib.request.Request(
@@ -104,7 +109,13 @@ def _call_openrouter(
             last_error = ClassifierError(f"Unexpected OpenRouter response shape: {payload}")
             continue
 
-    raise last_error if last_error else ClassifierError("classifier call failed with no response")
+    # Wrapped, not re-raised bare: every caller (check_is_job_posting, is_good_fit)
+    # is only ever built to catch ClassifierError and fail open - a bare URLError/
+    # TimeoutError (e.g. a 429 from OpenRouter) would otherwise crash the whole
+    # scan before it reaches any user, instead of just skipping this one listing.
+    if last_error is None:
+        raise ClassifierError("classifier call failed with no response")
+    raise ClassifierError(f"OpenRouter call failed: {last_error}") from last_error
 
 
 def check_is_job_posting(api_key: str, model: str, listing: Listing) -> tuple[bool, str]:

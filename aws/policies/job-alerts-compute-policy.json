@@ -27,14 +27,23 @@
         "lambda:CreateFunctionUrlConfig",
         "lambda:UpdateFunctionUrlConfig",
         "lambda:GetFunctionUrlConfig",
-        "lambda:DeleteFunctionUrlConfig"
+        "lambda:DeleteFunctionUrlConfig",
+        "lambda:PutFunctionConcurrency",
+        "lambda:DeleteFunctionConcurrency"
       ],
       "Resource": "arn:aws:lambda:us-west-1:863516093571:function:job-alerts-*"
     },
     {
       "Sid": "ScheduleProvision",
       "Effect": "Allow",
-      "Action": ["events:PutRule", "events:PutTargets", "events:DescribeRule", "events:ListTargetsByRule"],
+      "Action": [
+        "events:PutRule",
+        "events:PutTargets",
+        "events:DescribeRule",
+        "events:ListTargetsByRule",
+        "events:DisableRule",
+        "events:EnableRule"
+      ],
       "Resource": "arn:aws:events:us-west-1:863516093571:rule/job-alerts-*"
     }
   ]

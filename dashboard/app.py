@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import concurrent.futures
 import json
 import os
 import secrets
@@ -551,9 +552,69 @@ def _last_invocation_time(hours: int = 1) -> str | None:
     return datetime.fromtimestamp(latest_ms / 1000, tz=timezone.utc).isoformat()
 
 
-def _recent_metrics(hours: int = 24) -> dict[str, Any]:
+def _duration_series(hours: int) -> list[dict[str, Any]]:
+    """Per-invocation Duration, not the single 24h average - period=300 lines up
+    with SCHEDULE_RATE so each real run gets its own point on the chart."""
     end_time = time.time()
     start_time = end_time - hours * 3600
+    response = cloudwatch_client.get_metric_data(
+        MetricDataQueries=[_metric_query("duration_series", 300, "AWS/Lambda", "Duration", "Average", WATCH_FUNCTION_NAME)],
+        StartTime=start_time,
+        EndTime=end_time,
+        ScanBy="TimestampAscending",
+    )
+    result = response["MetricDataResults"][0]
+    return [
+        {"timestamp": timestamp.isoformat(), "value": round(value, 2)}
+        for timestamp, value in zip(result["Timestamps"], result["Values"])
+    ]
+
+
+MAX_LOG_SCAN_PAGES = 10
+
+
+def _structured_log_series(event_name: str, hours: int) -> list[dict[str, Any]]:
+    """Parses watch.py's `print(json.dumps({"event": event_name, ...}))` lines
+    into per-run data points, keyed by the log event's own timestamp.
+
+    filter_log_events can return an empty page with nextToken still set - a
+    single call finishing with zero events does NOT mean there are no matches,
+    only that it gave up scanning before finding one (this log group is noisy
+    enough that a bare unpaginated call was silently returning nothing despite
+    real matches existing). FilterLogEvents always scans forward from startTime
+    with no way to reverse that order, so this pages until it either finds
+    matches or exhausts MAX_LOG_SCAN_PAGES.
+    """
+    start_time_ms = int((time.time() - hours * 3600) * 1000)
+    parsed: list[dict[str, Any]] = []
+    next_token: str | None = None
+    for _ in range(MAX_LOG_SCAN_PAGES):
+        kwargs: dict[str, Any] = {
+            "logGroupName": WATCH_LOG_GROUP,
+            "startTime": start_time_ms,
+            "filterPattern": event_name,
+            "interleaved": True,
+        }
+        if next_token:
+            kwargs["nextToken"] = next_token
+        response = logs_client.filter_log_events(**kwargs)
+        for event in response.get("events", []):
+            try:
+                payload = json.loads(event["message"])
+            except json.JSONDecodeError:
+                continue
+            if payload.get("event") != event_name:
+                continue
+            payload["timestamp"] = datetime.fromtimestamp(event["timestamp"] / 1000, tz=timezone.utc).isoformat()
+            parsed.append(payload)
+        next_token = response.get("nextToken")
+        if not next_token:
+            break
+    parsed.sort(key=lambda item: item["timestamp"])
+    return parsed
+
+
+def _invocation_metrics(start_time: float, end_time: float) -> dict[str, Any]:
     queries = [
         _metric_query("invocations", 300, "AWS/Lambda", "Invocations", "Sum", WATCH_FUNCTION_NAME),
         _metric_query("errors", 86400, "AWS/Lambda", "Errors", "Sum", WATCH_FUNCTION_NAME),
@@ -574,9 +635,38 @@ def _recent_metrics(hours: int = 24) -> dict[str, Any]:
     invocation_values = by_id["invocations"]["Values"]
     return {
         "invocations_24h": round(sum(invocation_values), 2),
-        "last_ran": _last_invocation_time(),
         "errors_24h": latest("errors"),
         "avg_duration_ms": latest("avg_duration_ms"),
+    }
+
+
+def _recent_metrics(hours: int = 24) -> dict[str, Any]:
+    end_time = time.time()
+    start_time = end_time - hours * 3600
+
+    # Independent CloudWatch/Logs round-trips, dispatched concurrently rather than
+    # one after another - filter_log_events scanning a noisy 24h log group for a
+    # term with no matches can alone take several seconds, and serializing five of
+    # these back to back is what was making the metrics page painfully slow to load.
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+        invocation_metrics_future = executor.submit(_invocation_metrics, start_time, end_time)
+        last_ran_future = executor.submit(_last_invocation_time)
+        duration_series_future = executor.submit(_duration_series, hours)
+        throughput_future = executor.submit(_structured_log_series, "scan_summary", hours)
+        backlog_future = executor.submit(_structured_log_series, "classifier_backlog", hours)
+
+        invocation_metrics = invocation_metrics_future.result()
+        last_ran = last_ran_future.result()
+        duration_series = duration_series_future.result()
+        throughput_series = throughput_future.result()
+        backlog_series = backlog_future.result()
+
+    return {
+        **invocation_metrics,
+        "last_ran": last_ran,
+        "duration_series": duration_series,
+        "throughput_series": throughput_series,
+        "backlog_series": backlog_series,
     }
 
 

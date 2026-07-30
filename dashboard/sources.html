@@ -13,6 +13,9 @@
 </script>
 <script src="https://cdn.tailwindcss.com"></script>
 <script>tailwind.config = { darkMode: "class" };</script>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.15.12/dist/cdn.min.js"
+  integrity="sha384-pb6hrQvo4s23cEUFtj0CZkzGE3jyK3pj26RIupXXxhSrrcUA/Cn0lZgcCrGH0t6L"
+  crossorigin="anonymous"></script>
 <style>
   ::-webkit-scrollbar { width: 10px; height: 10px; }
   ::-webkit-scrollbar-track { background: transparent; }
@@ -47,10 +50,10 @@
 <div id="app" class="hidden flex h-screen overflow-hidden">
 __SIDEBAR__
 
-  <main class="flex-1 p-6 flex flex-col min-h-0">
+  <main class="flex-1 p-6 flex flex-col min-h-0" x-data="sourcesPage()" x-init="init()">
     <div class="flex items-center justify-between mb-6 shrink-0">
       <h2 class="text-xs font-semibold tracking-widest uppercase text-neutral-500 dark:text-neutral-500">Companies</h2>
-      <button id="refresh-btn"
+      <button @click="loadCompanies()"
         class="text-xs px-3 py-1.5 rounded-none border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-900">
         Refresh
       </button>
@@ -59,282 +62,262 @@ __SIDEBAR__
     <div class="border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3 mb-6 shrink-0">
       <label class="block text-xs font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-500 mb-2">Add a company</label>
       <div class="grid sm:grid-cols-3 gap-3 mb-3">
-        <input type="text" id="new-company-name" placeholder="Company name"
+        <input type="text" x-model.trim="newCompany.name" placeholder="Company name"
           class="rounded-none border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-neutral-500">
-        <select id="new-company-kind" class="rounded-none border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm">
+        <select x-model="newCompany.kind" class="rounded-none border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm">
           <option value="community">Community filter only</option>
           <option value="greenhouse">Greenhouse-backed</option>
           <option value="ashby">Ashby-backed</option>
           <option value="direct">Direct scrape (own careers site)</option>
           <option value="zyte">Zyte-backed (paid, anti-bot bypass)</option>
         </select>
-        <button id="add-company-btn"
+        <button @click="addCompany()"
           class="rounded-none bg-neutral-900 hover:opacity-50 dark:bg-neutral-100 text-white dark:text-neutral-900 text-sm font-medium px-3 py-1.5">
           Add
         </button>
       </div>
-      <input type="text" id="new-company-token" placeholder="Greenhouse board token"
-        class="hidden w-full mb-3 rounded-none border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-neutral-500">
-      <input type="text" id="new-company-board-name" placeholder="Ashby board name (from jobs.ashbyhq.com/<board-name>)"
-        class="hidden w-full mb-3 rounded-none border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-neutral-500">
-      <div id="new-company-direct-fields" class="grid sm:grid-cols-3 gap-3 mb-3">
-        <input type="text" id="new-company-intern-url" placeholder="Intern listings URL"
+      <input type="text" x-show="newCompany.kind === 'greenhouse'" x-model.trim="newCompany.boardToken" placeholder="Greenhouse board token"
+        class="w-full mb-3 rounded-none border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-neutral-500">
+      <input type="text" x-show="newCompany.kind === 'ashby'" x-model.trim="newCompany.boardName" placeholder="Ashby board name (from jobs.ashbyhq.com/<board-name>)"
+        class="w-full mb-3 rounded-none border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-neutral-500">
+      <div class="grid sm:grid-cols-3 gap-3 mb-3">
+        <input type="text" x-model.trim="newCompany.internUrl" placeholder="Intern listings URL"
           class="rounded-none border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-neutral-500">
-        <input type="text" id="new-company-newgrad-url" placeholder="New grad listings URL"
+        <input type="text" x-model.trim="newCompany.newgradUrl" placeholder="New grad listings URL"
           class="rounded-none border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-neutral-500">
-        <input type="text" id="new-company-fulltime-url" placeholder="Full-time listings URL"
+        <input type="text" x-model.trim="newCompany.fulltimeUrl" placeholder="Full-time listings URL"
           class="rounded-none border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-neutral-500">
       </div>
       <p class="text-xs text-neutral-500 dark:text-neutral-500 mb-2">If the source can't filter by role (e.g. greenhouse/ashby/community), use the same URL for all three.</p>
-      <p id="add-company-status" class="mt-2 text-sm text-neutral-500 dark:text-neutral-500"></p>
+      <p class="mt-2 text-sm text-neutral-500 dark:text-neutral-500" x-text="addStatus"></p>
     </div>
 
-    <div id="companies-table" class="flex-1 min-h-0 border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 overflow-y-auto overflow-x-hidden"></div>
+    <div class="flex-1 min-h-0 border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 overflow-y-auto overflow-x-hidden">
+      <div x-show="loading" class="px-4 py-6 text-sm text-neutral-500 dark:text-neutral-500">Loading…</div>
+      <div x-show="!loading && loadError" class="px-4 py-6 text-sm text-red-600 dark:text-red-400">Failed to load companies</div>
+      <div x-show="!loading && !loadError && companies.length === 0" class="px-4 py-6 text-sm text-neutral-500 dark:text-neutral-500">No companies yet</div>
+      <table x-show="!loading && !loadError && companies.length > 0" class="w-full table-fixed border-collapse text-sm">
+        <thead>
+          <tr class="sticky top-0 bg-white dark:bg-neutral-900 border-b border-neutral-200 dark:border-neutral-800 text-left text-xs uppercase tracking-wide text-neutral-500 dark:text-neutral-500">
+            <th class="px-3 py-2 font-medium w-1/12">Name</th>
+            <th class="px-3 py-2 font-medium w-3/12">Source</th>
+            <th class="px-3 py-2 font-medium w-2/12">Job types</th>
+            <th class="px-3 py-2 font-medium w-2/12">Last success</th>
+            <th class="px-3 py-2 font-medium w-2/12">Last failure</th>
+            <th class="px-3 py-2 font-medium w-1/12">Success rate</th>
+            <th class="px-3 py-2 font-medium w-2/12"></th>
+          </tr>
+        </thead>
+        <tbody>
+          <template x-for="company in companies" :key="company.company_name">
+            <tr class="border-b border-neutral-100 dark:border-neutral-900 last:border-0">
+              <td class="px-3 py-2 break-words" x-text="company.company_name"></td>
+              <td class="px-3 py-2 font-mono text-xs break-all" x-text="sourceLabel(company)"></td>
+              <td class="px-3 py-2 text-neutral-500 dark:text-neutral-500" x-text="jobTypesLabel(company)"></td>
+              <td class="px-3 py-2 font-mono text-xs text-neutral-500 dark:text-neutral-500" x-text="lastSuccess(company)"></td>
+              <td class="px-3 py-2 font-mono text-xs text-neutral-500 dark:text-neutral-500" x-text="lastFailure(company)"></td>
+              <td class="px-3 py-2" x-text="successRate(company)"></td>
+              <td class="px-3 py-2 text-right">
+                <button @click="openModal(company)"
+                  class="text-xs px-2 py-1 mr-2 rounded-none border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-900">
+                  Config
+                </button>
+                <button @click="removeCompany(company)"
+                  class="text-xs px-2 py-1 rounded-none border border-red-200 dark:border-red-900 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950">
+                  Remove
+                </button>
+              </td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+    </div>
+
+    <div x-show="modalCompany" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" @click.self="closeModal()">
+      <div class="w-full max-w-lg rounded-none border border-neutral-300 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-5">
+        <div class="flex items-center justify-between mb-4">
+          <h3 class="text-sm font-semibold" x-text="modalCompany ? `${modalCompany.company_name} - Source config` : ''"></h3>
+          <button @click="closeModal()"
+            class="text-xs px-2 py-1 rounded-none border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-900">
+            Close
+          </button>
+        </div>
+        <dl class="space-y-3">
+          <template x-for="[label, value] in sourceConfigFields(modalCompany)" :key="label">
+            <div>
+              <dt class="text-xs uppercase tracking-wide text-neutral-500 dark:text-neutral-500 mb-1" x-text="label"></dt>
+              <dd class="font-mono text-xs break-all" :class="value ? '' : 'text-neutral-400 dark:text-neutral-600'" x-text="value || 'not set'"></dd>
+            </div>
+          </template>
+        </dl>
+      </div>
+    </div>
   </main>
-</div>
-
-<div id="urls-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-  <div class="w-full max-w-lg rounded-none border border-neutral-300 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-5">
-    <div class="flex items-center justify-between mb-4">
-      <h3 id="urls-modal-title" class="text-sm font-semibold"></h3>
-      <button id="urls-modal-close"
-        class="text-xs px-2 py-1 rounded-none border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-900">
-        Close
-      </button>
-    </div>
-    <dl id="urls-modal-body" class="space-y-3"></dl>
-  </div>
 </div>
 
 <script src="/shared.js"></script>
 <script>
-async function showApp() {
-  showAppShell();
-  if (!(await requireAdmin())) return;
-  loadCompanies();
-}
+document.addEventListener("alpine:init", () => {
+  Alpine.data("sourcesPage", () => ({
+    companies: [],
+    healthSources: [],
+    loading: true,
+    loadError: false,
+    newCompany: { name: "", kind: "community", boardToken: "", boardName: "", internUrl: "", newgradUrl: "", fulltimeUrl: "" },
+    addStatus: "",
+    modalCompany: null,
 
-document.getElementById("refresh-btn").addEventListener("click", () => {
-  loadCompanies();
-});
+    async init() {
+      if (!token()) {
+        showGate();
+        return;
+      }
+      showAppShell();
+      if (!(await requireAdmin())) return;
+      await this.loadCompanies();
+    },
 
-function renderMessage(container, text, extraClass) {
-  container.innerHTML = `<div class="px-4 py-6 text-sm ${extraClass}">${text}</div>`;
-}
+    async loadCompanies() {
+      this.loading = true;
+      this.loadError = false;
+      try {
+        const [companiesResponse, healthResponse] = await Promise.all([
+          apiFetch("/api/admin/companies"),
+          apiFetch("/api/admin/source-health"),
+        ]);
+        ({ companies: this.companies } = await companiesResponse.json());
+        ({ sources: this.healthSources } = await healthResponse.json());
+      } catch (error) {
+        this.loadError = true;
+      }
+      this.loading = false;
+    },
 
-document.getElementById("new-company-kind").addEventListener("change", (event) => {
-  const kind = event.target.value;
-  document.getElementById("new-company-token").classList.toggle("hidden", kind !== "greenhouse");
-  document.getElementById("new-company-board-name").classList.toggle("hidden", kind !== "ashby");
-});
+    async addCompany() {
+      const name = this.newCompany.name.trim();
+      if (!name) return;
+      this.addStatus = "Adding...";
+      try {
+        await apiFetch("/api/admin/companies", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            company_name: name,
+            source_kind: this.newCompany.kind,
+            board_token: this.newCompany.boardToken,
+            board_name: this.newCompany.boardName,
+            intern_url: this.newCompany.internUrl,
+            newgrad_url: this.newCompany.newgradUrl,
+            fulltime_url: this.newCompany.fulltimeUrl,
+          }),
+        });
+        this.addStatus = `Added ${name}`;
+        this.newCompany = { name: "", kind: "community", boardToken: "", boardName: "", internUrl: "", newgradUrl: "", fulltimeUrl: "" };
+        await this.loadCompanies();
+      } catch (error) {
+        this.addStatus = "Failed to add company";
+      }
+    },
 
-document.getElementById("add-company-btn").addEventListener("click", async () => {
-  const status = document.getElementById("add-company-status");
-  const nameInput = document.getElementById("new-company-name");
-  const name = nameInput.value.trim();
-  if (!name) return;
-  const sourceKind = document.getElementById("new-company-kind").value;
-  status.textContent = "Adding...";
-  try {
-    await apiFetch("/api/admin/companies", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        company_name: name,
-        source_kind: sourceKind,
-        board_token: document.getElementById("new-company-token").value.trim(),
-        board_name: document.getElementById("new-company-board-name").value.trim(),
-        intern_url: document.getElementById("new-company-intern-url").value.trim(),
-        newgrad_url: document.getElementById("new-company-newgrad-url").value.trim(),
-        fulltime_url: document.getElementById("new-company-fulltime-url").value.trim(),
-      }),
-    });
-    status.textContent = `Added ${name}`;
-    nameInput.value = "";
-    document.getElementById("new-company-token").value = "";
-    document.getElementById("new-company-board-name").value = "";
-    document.getElementById("new-company-intern-url").value = "";
-    document.getElementById("new-company-newgrad-url").value = "";
-    document.getElementById("new-company-fulltime-url").value = "";
-    loadCompanies();
-  } catch (error) {
-    status.textContent = "Failed to add company";
-  }
-});
-
-// Every per-company source names itself "{kind}:{company_name}:{job_type}" (see sources/*.py); "community" is the one exception, a single shared source with no company suffix.
-function getCompanyHealthRows(company, healthSources) {
-  const kind = company.source_kind;
-  if (kind === "community") {
-    return healthSources.filter((s) => s.source_name === kind);
-  }
-  return healthSources.filter((s) => s.source_name.startsWith(`${kind}:${company.company_name}:`));
-}
-
-function renderUrlField(label, value) {
-  return `
-    <div>
-      <dt class="text-xs uppercase tracking-wide text-neutral-500 dark:text-neutral-500 mb-1">${label}</dt>
-      <dd class="font-mono text-xs break-all ${value ? "" : "text-neutral-400 dark:text-neutral-600"}">${value || "not set"}</dd>
-    </div>
-  `;
-}
-
-// Every kind shows the same four URL fields; Intern/New grad/Full-time fall back to General URL when the company has no distinct page (mirrors watch.py's _job_type_url).
-function sourceConfigFields(company) {
-  const kind = company.source_kind;
-  const effective = (field) => company[field] || company.general_url;
-  const urlFields = [
-    ["Intern URL", effective("intern_url")],
-    ["New grad URL", effective("newgrad_url")],
-    ["Full-time URL", effective("fulltime_url")],
-    ["General URL", company.general_url],
-  ];
-  if (kind === "greenhouse") {
-    return [
-      ...urlFields,
-      ["Board token", company.board_token],
-      ["API URL", company.board_token && `https://boards-api.greenhouse.io/v1/boards/${company.board_token}/jobs`],
-    ];
-  }
-  if (kind === "ashby") {
-    return [
-      ...urlFields,
-      ["Board name", company.board_name],
-      ["API URL", company.board_name && `https://api.ashbyhq.com/posting-api/job-board/${company.board_name}`],
-    ];
-  }
-  if (kind === "workday") {
-    return [...urlFields, ["Board token", company.board_token]];
-  }
-  if (kind === "amazon") {
-    return [...urlFields, ["Fetched via", "https://www.amazon.jobs/en/search.json (fixed, built into the source)"]];
-  }
-  if (kind === "oracle") {
-    return [...urlFields, ["Fetched via", "Oracle Recruiting Cloud API (full-text search, title-filtered)"]];
-  }
-  if (kind === "sitemap") {
-    return [...urlFields, ["Fetched via", "public sitemap.xml (titles approximated from URL slugs)"]];
-  }
-  if (kind === "direct" || kind === "zyte" || kind === "apple" || kind === "google") {
-    return urlFields;
-  }
-  // community - single shared scraper, no per-company config at all
-  return [["Config", "Built-in scraper, no per-company URL or token"]];
-}
-
-function showUrlsModal(company) {
-  document.getElementById("urls-modal-title").textContent = `${company.company_name} - Source config`;
-  document.getElementById("urls-modal-body").innerHTML = sourceConfigFields(company)
-    .map(([label, value]) => renderUrlField(label, value))
-    .join("");
-  document.getElementById("urls-modal").classList.remove("hidden");
-}
-
-function hideUrlsModal() {
-  document.getElementById("urls-modal").classList.add("hidden");
-}
-
-document.getElementById("urls-modal-close").addEventListener("click", hideUrlsModal);
-document.getElementById("urls-modal").addEventListener("click", (event) => {
-  if (event.target.id === "urls-modal") hideUrlsModal();
-});
-
-function formatSuccessRate(successCount, failureCount) {
-  const total = successCount + failureCount;
-  return total === 0 ? "-" : `${Math.round((successCount / total) * 100)}%`;
-}
-
-async function loadCompanies() {
-  const container = document.getElementById("companies-table");
-  renderMessage(container, "Loading…", "text-neutral-500 dark:text-neutral-500");
-  let companies, healthSources;
-  try {
-    const [companiesResponse, healthResponse] = await Promise.all([
-      apiFetch("/api/admin/companies"),
-      apiFetch("/api/admin/source-health"),
-    ]);
-    ({ companies } = await companiesResponse.json());
-    ({ sources: healthSources } = await healthResponse.json());
-  } catch (error) {
-    renderMessage(container, "Failed to load companies", "text-red-600 dark:text-red-400");
-    return;
-  }
-  if (companies.length === 0) {
-    renderMessage(container, "No companies yet", "text-neutral-500 dark:text-neutral-500");
-    return;
-  }
-  const table = document.createElement("table");
-  table.className = "w-full table-fixed border-collapse text-sm";
-  table.innerHTML = `
-    <thead>
-      <tr class="sticky top-0 bg-white dark:bg-neutral-900 border-b border-neutral-200 dark:border-neutral-800 text-left text-xs uppercase tracking-wide text-neutral-500 dark:text-neutral-500">
-        <th class="px-3 py-2 font-medium w-1/12">Name</th>
-        <th class="px-3 py-2 font-medium w-3/12">Source</th>
-        <th class="px-3 py-2 font-medium w-2/12">Job types</th>
-        <th class="px-3 py-2 font-medium w-2/12">Last success</th>
-        <th class="px-3 py-2 font-medium w-2/12">Last failure</th>
-        <th class="px-3 py-2 font-medium w-1/12">Success rate</th>
-        <th class="px-3 py-2 font-medium w-2/12"></th>
-      </tr>
-    </thead>
-  `;
-  const tbody = document.createElement("tbody");
-  for (const company of companies) {
-    const row = document.createElement("tr");
-    row.className = "border-b border-neutral-100 dark:border-neutral-900 last:border-0";
-    const jobTypes = ["intern_url", "newgrad_url", "fulltime_url"]
-      .filter((field) => company[field])
-      .map((field) => field.replace("_url", ""))
-      .join(", ");
-    // Matches the actual source_name prefix from getCompanyHealthRows.
-    const sourceLabel =
-      company.source_kind === "community" ? company.source_kind : `${company.source_kind}:${company.company_name}`;
-
-    const healthRows = getCompanyHealthRows(company, healthSources);
-    const neverRun = healthRows.length === 0;
-    const lastSuccessAt = neverRun ? null : Math.max(...healthRows.map((r) => r.last_success_at || 0)) || null;
-    const lastFailureAt = neverRun ? null : Math.max(...healthRows.map((r) => r.last_failure_at || 0)) || null;
-    const successCount = healthRows.reduce((sum, r) => sum + (r.success_count || 0), 0);
-    const failureCount = healthRows.reduce((sum, r) => sum + (r.failure_count || 0), 0);
-    const lastSuccess = neverRun ? "Never run" : lastSuccessAt ? new Date(lastSuccessAt * 1000).toISOString().replace(/\.\d{3}Z$/, "Z") : "-";
-    const lastFailure = neverRun ? "Never run" : lastFailureAt ? new Date(lastFailureAt * 1000).toISOString().replace(/\.\d{3}Z$/, "Z") : "-";
-
-    row.innerHTML = `
-      <td class="px-3 py-2 break-words">${company.company_name}</td>
-      <td class="px-3 py-2 font-mono text-xs break-all">${sourceLabel}</td>
-      <td class="px-3 py-2 text-neutral-500 dark:text-neutral-500">${jobTypes || "-"}</td>
-      <td class="px-3 py-2 font-mono text-xs text-neutral-500 dark:text-neutral-500">${lastSuccess}</td>
-      <td class="px-3 py-2 font-mono text-xs text-neutral-500 dark:text-neutral-500">${lastFailure}</td>
-      <td class="px-3 py-2">${neverRun ? "-" : formatSuccessRate(successCount, failureCount)}</td>
-      <td class="px-3 py-2 text-right"></td>
-    `;
-    const urlsBtn = document.createElement("button");
-    urlsBtn.textContent = "Config";
-    urlsBtn.className = "text-xs px-2 py-1 mr-2 rounded-none border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-900";
-    urlsBtn.addEventListener("click", () => showUrlsModal(company));
-    row.lastElementChild.appendChild(urlsBtn);
-
-    const removeBtn = document.createElement("button");
-    removeBtn.textContent = "Remove";
-    removeBtn.className = "text-xs px-2 py-1 rounded-none border border-red-200 dark:border-red-900 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950";
-    removeBtn.addEventListener("click", async () => {
+    async removeCompany(company) {
       await apiFetch(`/api/admin/companies/${encodeURIComponent(company.company_name)}`, { method: "DELETE" });
-      loadCompanies();
-    });
-    row.lastElementChild.appendChild(removeBtn);
-    tbody.appendChild(row);
-  }
-  table.appendChild(tbody);
-  container.innerHTML = "";
-  container.appendChild(table);
-}
+      await this.loadCompanies();
+    },
 
-if (token()) {
-  showApp();
-} else {
-  showGate();
-}
+    openModal(company) {
+      this.modalCompany = company;
+    },
+
+    closeModal() {
+      this.modalCompany = null;
+    },
+
+    // Every per-company source names itself "{kind}:{company_name}:{job_type}" (see sources/*.py); "community" is the one exception, a single shared source with no company suffix.
+    getCompanyHealthRows(company) {
+      const kind = company.source_kind;
+      if (kind === "community") {
+        return this.healthSources.filter((s) => s.source_name === kind);
+      }
+      return this.healthSources.filter((s) => s.source_name.startsWith(`${kind}:${company.company_name}:`));
+    },
+
+    // Matches the actual source_name prefix from getCompanyHealthRows.
+    sourceLabel(company) {
+      return company.source_kind === "community" ? company.source_kind : `${company.source_kind}:${company.company_name}`;
+    },
+
+    jobTypesLabel(company) {
+      return ["intern_url", "newgrad_url", "fulltime_url"].filter((field) => company[field]).map((field) => field.replace("_url", "")).join(", ") || "-";
+    },
+
+    lastSuccess(company) {
+      const rows = this.getCompanyHealthRows(company);
+      if (rows.length === 0) return "Never run";
+      const at = Math.max(...rows.map((r) => r.last_success_at || 0)) || null;
+      return at ? new Date(at * 1000).toISOString().replace(/\.\d{3}Z$/, "Z") : "-";
+    },
+
+    lastFailure(company) {
+      const rows = this.getCompanyHealthRows(company);
+      if (rows.length === 0) return "Never run";
+      const at = Math.max(...rows.map((r) => r.last_failure_at || 0)) || null;
+      return at ? new Date(at * 1000).toISOString().replace(/\.\d{3}Z$/, "Z") : "-";
+    },
+
+    successRate(company) {
+      const rows = this.getCompanyHealthRows(company);
+      if (rows.length === 0) return "-";
+      const successCount = rows.reduce((sum, r) => sum + (r.success_count || 0), 0);
+      const failureCount = rows.reduce((sum, r) => sum + (r.failure_count || 0), 0);
+      const total = successCount + failureCount;
+      return total === 0 ? "-" : `${Math.round((successCount / total) * 100)}%`;
+    },
+
+    // Every kind shows the same four URL fields; Intern/New grad/Full-time fall back to General URL when the company has no distinct page (mirrors watch.py's _job_type_url).
+    sourceConfigFields(company) {
+      if (!company) return [];
+      const kind = company.source_kind;
+      const effective = (field) => company[field] || company.general_url;
+      const urlFields = [
+        ["Intern URL", effective("intern_url")],
+        ["New grad URL", effective("newgrad_url")],
+        ["Full-time URL", effective("fulltime_url")],
+        ["General URL", company.general_url],
+      ];
+      if (kind === "greenhouse") {
+        return [
+          ...urlFields,
+          ["Board token", company.board_token],
+          ["API URL", company.board_token && `https://boards-api.greenhouse.io/v1/boards/${company.board_token}/jobs`],
+        ];
+      }
+      if (kind === "ashby") {
+        return [
+          ...urlFields,
+          ["Board name", company.board_name],
+          ["API URL", company.board_name && `https://api.ashbyhq.com/posting-api/job-board/${company.board_name}`],
+        ];
+      }
+      if (kind === "workday") {
+        return [...urlFields, ["Board token", company.board_token]];
+      }
+      if (kind === "amazon") {
+        return [...urlFields, ["Fetched via", "https://www.amazon.jobs/en/search.json (fixed, built into the source)"]];
+      }
+      if (kind === "oracle") {
+        return [...urlFields, ["Fetched via", "Oracle Recruiting Cloud API (full-text search, title-filtered)"]];
+      }
+      if (kind === "sitemap") {
+        return [...urlFields, ["Fetched via", "public sitemap.xml (titles approximated from URL slugs)"]];
+      }
+      if (kind === "direct" || kind === "zyte" || kind === "apple" || kind === "google") {
+        return urlFields;
+      }
+      // community - single shared scraper, no per-company config at all
+      return [["Config", "Built-in scraper, no per-company URL or token"]];
+    },
+  }));
+});
 </script>
 
 </body>

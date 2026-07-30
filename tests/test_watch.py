@@ -4,9 +4,9 @@ import time
 import unittest
 from unittest.mock import patch
 
-from classifier import ClassifierError
+from classifier import ClassificationResult, ClassifierError
 from sources.base import Listing
-from watch import _job_type_url, build_job_type_sources, resolve_listing_validity
+from watch import _job_type_url, build_job_type_sources, passes_classifier, resolve_listing_validity
 
 
 class BuildJobTypeSourcesZyteCooldownTests(unittest.TestCase):
@@ -73,6 +73,27 @@ def _listing(unique_source_id: str, company: str = "Example") -> Listing:
         locations=["Remote"],
         url=f"https://example.com/jobs/{unique_source_id}",
     )
+
+
+class PassesClassifierFailureModeTests(unittest.TestCase):
+    """Regression tests for the "friend getting spammed" incident: a classifier
+    failure must never fail open with fits=True anymore - see passes_classifier's
+    docstring. None means "retry next run", not "notify"."""
+
+    def test_returns_none_on_classifier_error_instead_of_notifying(self) -> None:
+        with patch("watch.is_good_fit", side_effect=ClassifierError("429 too many requests")):
+            result = passes_classifier("fake-key", "fake-model", "must be remote", _listing("1"))
+        self.assertIsNone(result)
+
+    def test_disabled_classifier_still_fails_open(self) -> None:
+        result = passes_classifier(None, "fake-model", "must be remote", _listing("1"))
+        self.assertEqual(result, ClassificationResult(fits=True, reason="classifier disabled"))
+
+    def test_successful_call_passes_through_unchanged(self) -> None:
+        expected = ClassificationResult(fits=False, reason="not remote")
+        with patch("watch.is_good_fit", return_value=expected):
+            result = passes_classifier("fake-key", "fake-model", "must be remote", _listing("1"))
+        self.assertEqual(result, expected)
 
 
 class ResolveListingValidityTests(unittest.TestCase):

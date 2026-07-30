@@ -13,6 +13,9 @@
 </script>
 <script src="https://cdn.tailwindcss.com"></script>
 <script>tailwind.config = { darkMode: "class" };</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.5.0/chart.umd.min.js"
+  integrity="sha512-Y51n9mtKTVBh3Jbx5pZSJNDDMyY+yGe77DGtBPzRlgsf/YLCh13kSZ3JmfHGzYFCmOndraf0sQgfM654b7dJ3w=="
+  crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 <style>
   ::-webkit-scrollbar { width: 10px; height: 10px; }
   ::-webkit-scrollbar-track { background: transparent; }
@@ -21,6 +24,26 @@
   @media (prefers-color-scheme: dark) {
     ::-webkit-scrollbar-thumb { background-color: rgb(64 64 64); }
     html { scrollbar-color: rgb(64 64 64) transparent; }
+  }
+
+  /* Chart color roles - see the dataviz skill's palette.md. Dark values swap via
+     the .dark class this dashboard already toggles, not a media query, since
+     that's the mechanism the rest of the app uses. */
+  .viz-root {
+    --chart-gridline: #e1e0d9;
+    --chart-axis: #898781;
+    --chart-baseline: #c3c2b7;
+    --series-1: #2a78d6;
+    --series-2: #eb6834;
+    --series-3: #1baf7a;
+  }
+  .dark .viz-root {
+    --chart-gridline: #2c2c2a;
+    --chart-axis: #898781;
+    --chart-baseline: #383835;
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --series-3: #199e70;
   }
 </style>
 </head>
@@ -57,6 +80,15 @@ __SIDEBAR__
     </div>
 
     <div id="metric-sections" class="space-y-8"></div>
+
+    <section class="mt-8">
+      <h3 class="text-xs font-semibold tracking-widest uppercase text-neutral-500 dark:text-neutral-500 mb-3">Charts</h3>
+      <div class="grid gap-6 xl:grid-cols-2">
+        <figure id="chart-duration" class="viz-root border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 px-4 py-4"></figure>
+        <figure id="chart-backlog" class="viz-root border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 px-4 py-4"></figure>
+        <figure id="chart-throughput" class="viz-root border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 px-4 py-4 xl:col-span-2"></figure>
+      </div>
+    </section>
   </main>
 </div>
 
@@ -132,6 +164,214 @@ function renderMessage(container, text, extraClass) {
   container.innerHTML = `<div class="border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 px-4 py-6 text-sm ${extraClass}">${text}</div>`;
 }
 
+function chartColors() {
+  const styles = getComputedStyle(document.querySelector(".viz-root"));
+  return {
+    grid: styles.getPropertyValue("--chart-gridline").trim(),
+    axis: styles.getPropertyValue("--chart-axis").trim(),
+    baseline: styles.getPropertyValue("--chart-baseline").trim(),
+    series1: styles.getPropertyValue("--series-1").trim(),
+    series2: styles.getPropertyValue("--series-2").trim(),
+    series3: styles.getPropertyValue("--series-3").trim(),
+  };
+}
+
+// Chart.js ships hover highlighting/tooltips but no crosshair line - this is the
+// standard way to add one: draw a hairline at the nearest active point's x on
+// every redraw. interaction.mode "index" (set per-chart) already finds that
+// nearest point for us; this just draws the line interaction.md asks for.
+const crosshairPlugin = {
+  id: "crosshair",
+  afterDatasetsDraw(chart) {
+    const active = chart.getActiveElements();
+    if (!active.length) return;
+    const { ctx, chartArea } = chart;
+    const x = active[0].element.x;
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(x, chartArea.top);
+    ctx.lineTo(x, chartArea.bottom);
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = chartColors().baseline;
+    ctx.stroke();
+    ctx.restore();
+  },
+};
+Chart.register(crosshairPlugin);
+
+function formatTimeTick(iso) {
+  const date = new Date(iso);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+// Chart.js has no built-in accessible/no-JS equivalent - this table is that twin,
+// toggled in alongside the canvas (see renderChartCard).
+function buildTableView(series, data) {
+  const table = document.createElement("table");
+  table.className = "w-full text-xs";
+  const headRow = document.createElement("tr");
+  const timeHead = document.createElement("th");
+  timeHead.className = "text-left font-medium text-neutral-500 dark:text-neutral-500 pb-2 pr-4";
+  timeHead.textContent = "Time";
+  headRow.appendChild(timeHead);
+  for (const s of series) {
+    const th = document.createElement("th");
+    th.className = "text-right font-medium text-neutral-500 dark:text-neutral-500 pb-2 pl-4";
+    th.textContent = s.label;
+    headRow.appendChild(th);
+  }
+  const thead = document.createElement("thead");
+  thead.appendChild(headRow);
+  table.appendChild(thead);
+
+  const tbody = document.createElement("tbody");
+  for (const point of data) {
+    const row = document.createElement("tr");
+    const timeCell = document.createElement("td");
+    timeCell.className = "py-1 pr-4 font-mono";
+    timeCell.textContent = formatLocalDate(point.timestamp);
+    row.appendChild(timeCell);
+    for (const s of series) {
+      const cell = document.createElement("td");
+      cell.className = "py-1 pl-4 text-right font-mono";
+      cell.textContent = String(point[s.key] ?? "-");
+      row.appendChild(cell);
+    }
+    tbody.appendChild(row);
+  }
+  table.appendChild(tbody);
+  return table;
+}
+
+const chartInstances = {};
+
+function renderChartCard(id, title, series, data, options = {}) {
+  const figureEl = document.getElementById(id);
+  figureEl.innerHTML = "";
+  if (chartInstances[id]) {
+    chartInstances[id].destroy();
+    delete chartInstances[id];
+  }
+
+  const header = document.createElement("div");
+  header.className = "flex items-center justify-between mb-3";
+  const heading = document.createElement("h4");
+  heading.className = "text-xs font-semibold tracking-widest uppercase text-neutral-500 dark:text-neutral-500";
+  heading.textContent = title;
+  header.appendChild(heading);
+  figureEl.appendChild(header);
+
+  if (!data.length) {
+    const empty = document.createElement("div");
+    empty.className = "text-sm text-neutral-500 dark:text-neutral-500 py-6";
+    empty.textContent = "No data in the selected window";
+    figureEl.appendChild(empty);
+    return;
+  }
+
+  const toggle = document.createElement("button");
+  toggle.type = "button";
+  toggle.className = "text-xs px-2 py-1 rounded-none border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-900";
+  toggle.textContent = "View as table";
+  header.appendChild(toggle);
+
+  const canvasWrapper = document.createElement("div");
+  canvasWrapper.className = "h-56";
+  const canvas = document.createElement("canvas");
+  canvasWrapper.appendChild(canvas);
+  figureEl.appendChild(canvasWrapper);
+
+  const tableWrapper = document.createElement("div");
+  tableWrapper.className = "hidden overflow-x-auto";
+  tableWrapper.appendChild(buildTableView(series, data));
+  figureEl.appendChild(tableWrapper);
+
+  let showingTable = false;
+  toggle.addEventListener("click", () => {
+    showingTable = !showingTable;
+    canvasWrapper.classList.toggle("hidden", showingTable);
+    tableWrapper.classList.toggle("hidden", !showingTable);
+    toggle.textContent = showingTable ? "View as chart" : "View as table";
+  });
+
+  const colors = chartColors();
+  const yFormat = options.yFormat || ((value) => value);
+  chartInstances[id] = new Chart(canvas, {
+    type: "line",
+    data: {
+      labels: data.map((point) => formatTimeTick(point.timestamp)),
+      datasets: series.map((s) => ({
+        label: s.label,
+        data: data.map((point) => Number(point[s.key]) || 0),
+        borderColor: s.color,
+        backgroundColor: s.color,
+        borderWidth: 2,
+        pointRadius: 0,
+        pointHoverRadius: 4,
+        pointHitRadius: 12,
+        tension: 0,
+      })),
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: "index", intersect: false },
+      plugins: {
+        legend: { display: series.length > 1, labels: { color: colors.axis, usePointStyle: true, boxWidth: 8 } },
+        tooltip: {
+          usePointStyle: true,
+          callbacks: {
+            title: (items) => formatLocalDate(data[items[0].dataIndex].timestamp),
+            label: (item) => `${yFormat(item.parsed.y)}  ${item.dataset.label}`,
+          },
+        },
+      },
+      scales: {
+        x: {
+          border: { color: colors.baseline },
+          grid: { color: colors.grid },
+          ticks: { color: colors.axis, autoSkip: true, maxTicksLimit: 6, maxRotation: 0 },
+          title: { display: true, text: "Time", color: colors.axis, font: { size: 11 } },
+        },
+        y: {
+          beginAtZero: true,
+          border: { color: colors.baseline },
+          grid: { color: colors.grid },
+          ticks: { color: colors.axis, callback: (value) => yFormat(value) },
+          title: { display: !!options.yAxisLabel, text: options.yAxisLabel || "", color: colors.axis, font: { size: 11 } },
+        },
+      },
+    },
+  });
+}
+
+function renderCharts(metrics) {
+  const colors = chartColors();
+  renderChartCard(
+    "chart-duration", "Duration",
+    [{ key: "value", label: "Duration (ms)", color: colors.series1 }],
+    metrics.duration_series || [],
+    { yFormat: (value) => `${Math.round(value)}ms`, yAxisLabel: "Duration (ms)" },
+  );
+  renderChartCard(
+    "chart-backlog", "Classifier backlog",
+    [{ key: "count", label: "Uncached listings", color: colors.series2 }],
+    metrics.backlog_series || [],
+    { yFormat: (value) => Math.round(value), yAxisLabel: "Listings" },
+  );
+  renderChartCard(
+    "chart-throughput", "Listings processed",
+    [
+      { key: "new", label: "New", color: colors.series1 },
+      { key: "notified", label: "Notified", color: colors.series2 },
+      { key: "dismissed", label: "Dismissed", color: colors.series3 },
+    ],
+    metrics.throughput_series || [],
+    { yFormat: (value) => Math.round(value), yAxisLabel: "Listings" },
+  );
+}
+
 async function loadMetrics() {
   const container = document.getElementById("metric-sections");
   renderMessage(container, "Loading…", "text-neutral-500 dark:text-neutral-500");
@@ -166,6 +406,7 @@ async function loadMetrics() {
     wrapper.appendChild(grid);
     container.appendChild(wrapper);
   }
+  renderCharts(metrics);
 }
 
 if (token()) {
@@ -175,6 +416,12 @@ if (token()) {
 }
 
 setInterval(() => { if (token()) loadMetrics(); }, 60000);
+
+// Chart colors are read once at render time (canvas can't resolve CSS var()
+// on its own), so a theme flip needs a re-render to pick up the new palette.
+document.getElementById("theme-toggle-btn").addEventListener("click", () => {
+  if (token()) loadMetrics();
+});
 </script>
 
 </body>
