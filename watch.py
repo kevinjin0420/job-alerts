@@ -264,7 +264,9 @@ def process_user(
     had_notification_failure = False
 
     classifier_active = classifier_enabled(openrouter_api_key, fit_prompt)
-    quota_exceeded = classifier_active and current_month_usage(user_id) >= MONTHLY_CLASSIFIER_CALL_CAP
+    quota_exceeded = (
+        classifier_active and not user.get("is_admin") and current_month_usage(user_id) >= MONTHLY_CLASSIFIER_CALL_CAP
+    )
     if quota_exceeded and new_listings and not has_notified_quota(user_id):
         try:
             notify_message(
