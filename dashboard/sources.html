@@ -44,11 +44,11 @@
   </div>
 </div>
 
-<div id="app" class="hidden flex min-h-screen">
+<div id="app" class="hidden flex h-screen overflow-hidden">
 __SIDEBAR__
 
-  <main class="flex-1 p-6">
-    <div class="flex items-center justify-between mb-6">
+  <main class="flex-1 p-6 flex flex-col min-h-0">
+    <div class="flex items-center justify-between mb-6 shrink-0">
       <h2 class="text-xs font-semibold tracking-widest uppercase text-neutral-500 dark:text-neutral-500">Companies</h2>
       <button id="refresh-btn"
         class="text-xs px-3 py-1.5 rounded-none border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-900">
@@ -56,7 +56,7 @@ __SIDEBAR__
       </button>
     </div>
 
-    <div class="border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3 mb-6">
+    <div class="border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3 mb-6 shrink-0">
       <label class="block text-xs font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-500 mb-2">Add a company</label>
       <div class="grid sm:grid-cols-3 gap-3 mb-3">
         <input type="text" id="new-company-name" placeholder="Company name"
@@ -89,7 +89,7 @@ __SIDEBAR__
       <p id="add-company-status" class="mt-2 text-sm text-neutral-500 dark:text-neutral-500"></p>
     </div>
 
-    <div id="companies-table" class="border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 max-h-[calc(100vh-160px)] overflow-y-auto overflow-x-hidden"></div>
+    <div id="companies-table" class="flex-1 min-h-0 border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 overflow-y-auto overflow-x-hidden"></div>
   </main>
 </div>
 
