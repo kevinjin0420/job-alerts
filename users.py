@@ -144,6 +144,15 @@ def save_ntfy_topic(user_id: str, ntfy_topic: str) -> None:
     )
 
 
+def complete_onboarding(user_id: str) -> None:
+    _dynamodb.update_item(
+        TableName=USERS_TABLE,
+        Key={"user_id": {"S": user_id}},
+        UpdateExpression="SET onboarding_completed = :true",
+        ExpressionAttributeValues={":true": {"BOOL": True}},
+    )
+
+
 def save_user_config(user_id: str, config: dict[str, Any]) -> None:
     item = dict(config)
     item["user_id"] = user_id
@@ -161,6 +170,7 @@ def create_user(user_id: str, *, is_admin: bool, ntfy_topic: str) -> None:
                 "ntfy_topic": ntfy_topic,
                 "active": True,
                 "created_at": int(time.time()),
+                "onboarding_completed": False,
             }
         ),
     )

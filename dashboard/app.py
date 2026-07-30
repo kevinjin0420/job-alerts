@@ -19,6 +19,7 @@ from config import SUPPORTED_JOB_TYPES
 from resume import ResumeFetchError, extract_resume_text, fetch_resume_text_from_url
 from sources.base import Listing
 from users import (
+    complete_onboarding,
     create_user,
     current_month_usage,
     delete_company,
@@ -93,6 +94,7 @@ PAGES = {
         "/admin": "admin.html",
         "/sources": "sources.html",
         "/profile": "profile.html",
+        "/onboarding": "onboarding.html",
     }.items()
 }
 SHARED_JS = (Path(__file__).parent / "shared.js").read_text()
@@ -127,8 +129,18 @@ def handler(event: dict[str, Any], _context: object) -> dict[str, Any]:
 
     if method == "GET" and path == "/api/me":
         return _json_response(
-            200, {"user_id": user_id, "is_admin": is_admin, "ntfy_topic": str(user.get("ntfy_topic", ""))}
+            200,
+            {
+                "user_id": user_id,
+                "is_admin": is_admin,
+                "ntfy_topic": str(user.get("ntfy_topic", "")),
+                # Missing on legacy rows created before onboarding existed - treat as already done.
+                "onboarding_completed": bool(user.get("onboarding_completed", True)),
+            },
         )
+    if method == "POST" and path == "/api/onboarding/complete":
+        complete_onboarding(user_id)
+        return _json_response(200, {"status": "completed"})
     if method == "PUT" and path == "/api/me":
         body = json.loads(event.get("body") or "{}")
         ntfy_topic = str(body.get("ntfy_topic", "")).strip()

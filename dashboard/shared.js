@@ -35,23 +35,32 @@ function revealAdminNav(isAdmin) {
   document.getElementById("admin-nav-separator").classList.toggle("hidden", !isAdmin);
 }
 
-// For pages any signed-in user can view: reveals admin-only nav links if
-// applicable, never redirects.
+// For pages any signed-in user can view: redirects to /onboarding if setup
+// isn't finished yet, otherwise reveals admin-only nav links if applicable.
 async function setupNav() {
   try {
     const response = await apiFetch("/api/me");
     const me = await response.json();
+    if (!me.onboarding_completed) {
+      window.location.href = "/onboarding";
+      return;
+    }
     revealAdminNav(me.is_admin);
   } catch (error) {
     // apiFetch already shows the gate on 401
   }
 }
 
-// For admin-only pages: redirects non-admins to /metrics. Returns whether
-// the current user is an admin (false means the caller should stop).
+// For admin-only pages: redirects to /onboarding if setup isn't finished,
+// then to /metrics for non-admins. Returns whether the current user is an
+// admin (false means the caller should stop).
 async function requireAdmin() {
   const response = await apiFetch("/api/me");
   const me = await response.json();
+  if (!me.onboarding_completed) {
+    window.location.href = "/onboarding";
+    return false;
+  }
   if (!me.is_admin) {
     window.location.href = "/metrics";
     return false;

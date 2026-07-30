@@ -60,7 +60,8 @@ trap 'rm -rf "${STAGE_DIR}" "${ZIP_PATH}"' EXIT
 cp "${REPO_ROOT}/dashboard/app.py" "${STAGE_DIR}/"
 cp "${REPO_ROOT}/dashboard/metrics.html" "${REPO_ROOT}/dashboard/config.html" "${REPO_ROOT}/dashboard/logs.html" \
   "${REPO_ROOT}/dashboard/admin.html" "${REPO_ROOT}/dashboard/listings.html" "${REPO_ROOT}/dashboard/sources.html" \
-  "${REPO_ROOT}/dashboard/profile.html" "${REPO_ROOT}/dashboard/shared.js" "${REPO_ROOT}/dashboard/sidebar.html" "${STAGE_DIR}/"
+  "${REPO_ROOT}/dashboard/profile.html" "${REPO_ROOT}/dashboard/onboarding.html" "${REPO_ROOT}/dashboard/shared.js" \
+  "${REPO_ROOT}/dashboard/sidebar.html" "${STAGE_DIR}/"
 cp "${REPO_ROOT}/config.py" "${REPO_ROOT}/users.py" "${REPO_ROOT}/classifier.py" "${REPO_ROOT}/resume.py" "${STAGE_DIR}/"
 cp -r "${REPO_ROOT}/sources" "${STAGE_DIR}/sources"
 echo "==> Installing dependencies"

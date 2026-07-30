@@ -126,6 +126,7 @@ function buildRow(item) {
     <td class="px-3 py-2 align-middle break-words">
       <div class="min-h-[2.5rem] flex items-center"><span class="line-clamp-2">${titleCell}</span></div>
     </td>
+    <td class="px-3 py-2 align-middle break-words font-mono text-xs text-neutral-500 dark:text-neutral-500">${item.source || "-"}</td>
     <td class="px-3 py-2 align-middle ${STATUS_STYLES[item.status] || ""}">${item.status || "legacy"}</td>
     <td class="px-3 py-2 align-middle break-words text-neutral-500 dark:text-neutral-500">
       <div class="min-h-[2.5rem] flex items-center"><span class="line-clamp-2">${item.reason || "-"}</span></div>
@@ -150,7 +151,7 @@ function renderRows() {
   const listings = getFilteredListings();
   tbody.innerHTML = "";
   if (listings.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="7" class="px-4 py-6 text-sm text-neutral-500 dark:text-neutral-500">No listings match</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="8" class="px-4 py-6 text-sm text-neutral-500 dark:text-neutral-500">No listings match</td></tr>`;
     return;
   }
   for (const item of listings) {
@@ -182,7 +183,8 @@ function renderListings() {
     <thead class="sticky top-0 z-10 bg-white dark:bg-neutral-900">
       <tr class="text-left text-xs uppercase tracking-wide text-neutral-500 dark:text-neutral-500">
         <th class="px-3 py-2 font-medium w-1/12">Company</th>
-        <th class="px-3 py-2 font-medium w-3/12">Title</th>
+        <th class="px-3 py-2 font-medium w-2/12">Title</th>
+        <th class="px-3 py-2 font-medium w-1/12">Source</th>
         <th class="px-3 py-2 font-medium w-1/12">Status</th>
         <th class="px-3 py-2 font-medium w-4/12">Reason</th>
         <th class="px-3 py-2 font-medium w-1/12">Fit score</th>
@@ -192,6 +194,7 @@ function renderListings() {
       <tr class="border-b border-neutral-200 dark:border-neutral-800">
         <th class="px-2 py-1.5">${columnFilterInput("company")}</th>
         <th class="px-2 py-1.5">${columnFilterInput("title")}</th>
+        <th class="px-2 py-1.5"></th>
         <th class="px-2 py-1.5">${columnFilterSelect("status", [
           ["", "None"],
           ["notified", "Notified"],
