@@ -1,20 +1,11 @@
 adobe
-uber
-confluent
 databricks
 reddit
-doordash
-stripe
 intel
 nvidia
-netflix
-roblox
-airbnb
 
-apple
 meta
 oracle
-google
 amazon
 microsoft
 
@@ -28,5 +19,6 @@ peloton
 shopify
 smarthseet
 
-tiktok
 bytedance
+
+figma
