@@ -89,7 +89,11 @@ def is_good_fit(
                     },
                 },
             },
-            "max_tokens": 200,
+            # Low reasoning effort: this is a short yes/no classification, not a task that
+            # needs deep chain-of-thought. Reasoning-capable models otherwise sometimes burn
+            # their whole token budget "thinking" and leave nothing for the actual JSON answer.
+            "reasoning": {"effort": "low"},
+            "max_tokens": 600,
         }
     ).encode("utf-8")
     request = urllib.request.Request(
@@ -98,24 +102,35 @@ def is_good_fit(
         headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
         method="POST",
     )
-    try:
-        with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
-            payload = json.loads(response.read())
-    except (urllib.error.URLError, TimeoutError) as error:
-        raise ClassifierError(str(error)) from error
 
-    try:
-        content = payload["choices"][0]["message"]["content"]
-        parsed = json.loads(content)
-        is_job_posting = bool(parsed["is_job_posting"])
-        result = ClassificationResult(
-            fits=is_job_posting and bool(parsed["fits"]),
-            reason=str(parsed["reason"]),
-            is_job_posting=is_job_posting,
-            fit_score=int(parsed["fit_score"]) if "fit_score" in parsed else None,
-        )
-    except (KeyError, IndexError, TypeError, json.JSONDecodeError) as error:
-        raise ClassifierError(f"Unexpected OpenRouter response shape: {payload}") from error
+    # One retry: an empty/malformed response is usually a one-off provider hiccup
+    # (see the "reasoning" comment above), and retrying once avoids treating a
+    # transient blip as a full classifier failure (which fails open and notifies).
+    last_error: Exception | None = None
+    for _ in range(2):
+        try:
+            with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
+                payload = json.loads(response.read())
+        except (urllib.error.URLError, TimeoutError) as error:
+            last_error = error
+            continue
+
+        try:
+            content = payload["choices"][0]["message"]["content"]
+            parsed = json.loads(content)
+            is_job_posting = bool(parsed["is_job_posting"])
+            result = ClassificationResult(
+                fits=is_job_posting and bool(parsed["fits"]),
+                reason=str(parsed["reason"]),
+                is_job_posting=is_job_posting,
+                fit_score=int(parsed["fit_score"]) if "fit_score" in parsed else None,
+            )
+            break
+        except (KeyError, IndexError, TypeError, json.JSONDecodeError) as error:
+            last_error = ClassifierError(f"Unexpected OpenRouter response shape: {payload}")
+            continue
+    else:
+        raise last_error if last_error else ClassifierError("classifier call failed with no response")
 
     usage = payload.get("usage", {})
     input_tokens = int(usage.get("prompt_tokens", 0))
