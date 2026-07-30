@@ -24,7 +24,9 @@ class GoogleJobsSource:
     instead of blocking other sources.
     """
 
-    name = "google"
+    def __init__(self) -> None:
+        # Hardcoded like GreenhouseSource - always Google, always intern-titled postings.
+        self.name = "google:Google:intern"
 
     def _fetch_page(self, page: int) -> list[list[object]]:
         query = urllib.parse.urlencode({"employment_type": "INTERN", "page": page})

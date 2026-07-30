@@ -271,7 +271,12 @@ def save_company(
     intern_url: str | None = None,
     newgrad_url: str | None = None,
     fulltime_url: str | None = None,
+    general_url: str | None = None,
 ) -> None:
+    """general_url is the fallback a "direct"/"zyte" source uses for whichever
+    of intern_url/newgrad_url/fulltime_url isn't set - e.g. a company with no
+    distinct new-grad listing page can set general_url instead of duplicating
+    one of the other three (see build_job_type_sources in watch.py)."""
     item: dict[str, Any] = {
         "company_name": name,
         "source_kind": source_kind,
@@ -284,6 +289,7 @@ def save_company(
         ("intern_url", intern_url),
         ("newgrad_url", newgrad_url),
         ("fulltime_url", fulltime_url),
+        ("general_url", general_url),
     ):
         if value:
             item[key] = value

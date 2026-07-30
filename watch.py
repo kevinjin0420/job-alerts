@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import concurrent.futures
 import os
 import sys
 import time
@@ -9,8 +10,11 @@ from classifier import ClassificationResult, ClassifierError, check_is_job_posti
 from notifiers import NotificationError, notify, notify_message
 from resume import ResumeFetchError, fetch_resume_text_from_url
 from sources import Listing, Source, build_sources
+from sources.amazon import QUERY_BY_JOB_TYPE as AMAZON_QUERY_BY_JOB_TYPE
+from sources.amazon import AmazonJobsSource
 from sources.ashby import AshbySource
 from sources.direct import DirectSource
+from sources.workday import WorkdaySource
 from sources.zyte import ZyteSource
 from users import (
     get_classifier_model,
@@ -34,6 +38,8 @@ DEFAULT_JOB_TYPES = ["intern"]
 SOURCE_FAILURE_ALERT_THRESHOLD = 3
 JOB_TYPE_URL_FIELDS = {"intern": "intern_url", "newgrad": "newgrad_url", "fulltime": "fulltime_url"}
 ZYTE_FETCH_INTERVAL_SECONDS = 6 * 60 * 60
+# ponytail: OpenRouter calls are I/O-bound, so a thread pool turns N sequential calls into N/32 - raise further if a burst-heavy run still times out.
+CLASSIFIER_CONCURRENCY = 32
 # ponytail: Zyte is billed per request, unlike every other source kind - gate it
 # to a 6h cadence here (at source-selection time, not inside ZyteSource itself)
 # rather than giving it its own CloudWatch schedule. This piggybacks on the
@@ -101,12 +107,22 @@ def resolve_job_type_pairs(config: dict[str, object]) -> set[tuple[str, str]]:
     return {(company, job_type) for company in companies for job_type in job_types}
 
 
+def _job_type_url(entry: dict[str, object], job_type: str) -> str | None:
+    """URL a "direct"/"zyte" source fetches for this job type - falls back to general_url when there's no distinct page for it."""
+    specific_url = entry.get(JOB_TYPE_URL_FIELDS.get(job_type, ""))
+    return str(specific_url) if specific_url else (str(entry["general_url"]) if entry.get("general_url") else None)
+
+
 def build_job_type_sources(
-    pairs: set[tuple[str, str]], catalog: dict[str, dict[str, object]]
+    pairs: set[tuple[str, str]], catalog: dict[str, dict[str, object]], *, enforce_zyte_cooldown: bool = True
 ) -> list[Source]:
-    """Sources resolved per (company, job_type) from the catalog, rather than
-    a flat spec string - covers any source kind whose fetch target depends on
-    which job type is being asked for."""
+    """Sources resolved per (company, job_type) from the catalog, rather than a flat spec string.
+
+    enforce_zyte_cooldown must be False when called just to read back a
+    source's .name for filtering (as process_user does) rather than to
+    actually fetch() - otherwise the cooldown looks "too recent" right after
+    the shared fetch succeeds, and silently drops listings it just paid for.
+    """
     sources: list[Source] = []
     for company, job_type in pairs:
         entry = catalog.get(company.strip().lower())
@@ -114,7 +130,7 @@ def build_job_type_sources(
             continue
         kind = entry.get("source_kind")
         if kind == "direct":
-            url = entry.get(JOB_TYPE_URL_FIELDS.get(job_type, ""))
+            url = _job_type_url(entry, job_type)
             if url:
                 sources.append(DirectSource(str(entry["company_name"]), str(url), job_type))
         elif kind == "ashby":
@@ -122,12 +138,24 @@ def build_job_type_sources(
             if board_name:
                 sources.append(AshbySource(str(entry["company_name"]), str(board_name), job_type))
         elif kind == "zyte":
-            url = entry.get(JOB_TYPE_URL_FIELDS.get(job_type, ""))
+            url = _job_type_url(entry, job_type)
             if url:
                 source = ZyteSource(str(entry["company_name"]), str(url), job_type)
-                last_success = get_source_last_success(source.name)
-                if last_success is None or time.time() - last_success >= ZYTE_FETCH_INTERVAL_SECONDS:
+                if not enforce_zyte_cooldown:
                     sources.append(source)
+                else:
+                    last_success = get_source_last_success(source.name)
+                    if last_success is None or time.time() - last_success >= ZYTE_FETCH_INTERVAL_SECONDS:
+                        sources.append(source)
+        elif kind == "workday":
+            # board_token is "host:tenant:site" (e.g. "wd5:nvidia:NVIDIAExternalCareerSite").
+            board_token = str(entry.get("board_token", ""))
+            parts = board_token.split(":")
+            if len(parts) == 3:
+                host, tenant, site = parts
+                sources.append(WorkdaySource(str(entry["company_name"]), host, tenant, site, job_type))
+        elif kind == "amazon" and job_type in AMAZON_QUERY_BY_JOB_TYPE:
+            sources.append(AmazonJobsSource(str(entry["company_name"]), job_type))
     return sources
 
 
@@ -177,32 +205,50 @@ def fetch_all_listings(sources: list[Source]) -> tuple[list[Listing], list[str]]
     return all_listings, newly_unhealthy
 
 
+def _check_listing_validity(
+    listing: Listing, openrouter_api_key: str, classifier_model: str
+) -> tuple[bool, str]:
+    try:
+        is_job_posting, reason = check_is_job_posting(openrouter_api_key, classifier_model, listing)
+    except ClassifierError as error:
+        print(f"Validity check failed for {listing.company_name} - {listing.title}, assuming valid: {error}", file=sys.stderr)
+        is_job_posting, reason = True, f"validity check error, assumed valid: {error}"
+    save_listing_validity(listing.unique_id, is_job_posting=is_job_posting, reason=reason)
+    return is_job_posting, reason
+
+
 def resolve_listing_validity(
     all_listings: list[Listing], openrouter_api_key: str | None, classifier_model: str
 ) -> dict[str, tuple[bool, str]]:
-    """Whether each listing is a real job posting vs. scraped page furniture - checked
-    once per listing, here, at fetch time (shared across every user), rather than
-    inside each user's own fit-check call: it's an objective fact about the listing,
-    not a per-user judgment, so recomputing it per user would just waste classifier
-    calls re-deriving the same answer. Results are cached forever in DynamoDB, so a
-    listing already seen in a prior scan is a free lookup, not another LLM call."""
+    """Whether each listing is a real job posting vs. scraped page furniture - checked once per listing (shared across users) and cached forever in DynamoDB.
+
+    Cache lookups run sequentially (cheap DynamoDB reads); only listings needing a live OpenRouter call go to a thread pool, since those are I/O-bound.
+    """
     validity: dict[str, tuple[bool, str]] = {}
     if not openrouter_api_key:
         return validity
+
+    seen_ids: set[str] = set()
+    uncached: list[Listing] = []
     for listing in all_listings:
-        if listing.unique_id in validity:
+        if listing.unique_id in seen_ids:
             continue
+        seen_ids.add(listing.unique_id)
         cached = get_listing_validity(listing.unique_id)
         if cached is not None:
             validity[listing.unique_id] = (bool(cached["is_job_posting"]), str(cached["reason"]))
-            continue
-        try:
-            is_job_posting, reason = check_is_job_posting(openrouter_api_key, classifier_model, listing)
-        except ClassifierError as error:
-            print(f"Validity check failed for {listing.company_name} - {listing.title}, assuming valid: {error}", file=sys.stderr)
-            is_job_posting, reason = True, f"validity check error, assumed valid: {error}"
-        save_listing_validity(listing.unique_id, is_job_posting=is_job_posting, reason=reason)
-        validity[listing.unique_id] = (is_job_posting, reason)
+        else:
+            uncached.append(listing)
+
+    if uncached:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=CLASSIFIER_CONCURRENCY) as executor:
+            futures = {
+                executor.submit(_check_listing_validity, listing, openrouter_api_key, classifier_model): listing
+                for listing in uncached
+            }
+            for future in concurrent.futures.as_completed(futures):
+                listing = futures[future]
+                validity[listing.unique_id] = future.result()
     return validity
 
 
@@ -267,7 +313,7 @@ def process_user(
     except ValueError as error:
         print(f"User {user_id}: invalid source configuration: {error}", file=sys.stderr)
         return 0, 0, 0, False
-    user_sources.extend(build_job_type_sources(resolve_job_type_pairs(config), catalog))
+    user_sources.extend(build_job_type_sources(resolve_job_type_pairs(config), catalog, enforce_zyte_cooldown=False))
     user_source_names = {source.name for source in user_sources}
 
     user_listings = [
@@ -290,13 +336,30 @@ def process_user(
     dismissed_count = 0
     had_notification_failure = False
 
+    # Classify valid listings concurrently, then apply notify/record side effects sequentially below in listing order.
+    listings_needing_classification = [
+        listing for listing in new_listings if listing_validity.get(listing.unique_id, (True, ""))[0]
+    ]
+    classifications: dict[str, ClassificationResult] = {}
+    if listings_needing_classification:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=CLASSIFIER_CONCURRENCY) as executor:
+            futures = {
+                executor.submit(
+                    passes_classifier, openrouter_api_key, classifier_model, fit_prompt, listing, resume_text
+                ): listing
+                for listing in listings_needing_classification
+            }
+            for future in concurrent.futures.as_completed(futures):
+                listing = futures[future]
+                classifications[listing.unique_id] = future.result()
+
     for listing in new_listings:
         is_job_posting, invalid_reason = listing_validity.get(listing.unique_id, (True, ""))
         if not is_job_posting:
             record_listings(user_id, [(listing, "invalid", invalid_reason, None)])
             print(f"User {user_id}: not a job posting: {listing.company_name} - {listing.title} ({invalid_reason})")
             continue
-        classification = passes_classifier(openrouter_api_key, classifier_model, fit_prompt, listing, resume_text)
+        classification = classifications[listing.unique_id]
         if not classification.fits:
             record_listings(user_id, [(listing, "dismissed", classification.reason, classification.fit_score)])
             dismissed_count += 1

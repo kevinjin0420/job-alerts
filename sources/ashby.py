@@ -19,7 +19,7 @@ class AshbySource:
     JSON, no scraping needed, same tier as GreenhouseSource."""
 
     def __init__(self, company_name: str, board_name: str, job_type: str) -> None:
-        self.name = f"ashby:{board_name}:{job_type}"
+        self.name = f"ashby:{company_name}:{job_type}"
         self._company_name = company_name
         self._board_name = board_name
         self._job_type = job_type

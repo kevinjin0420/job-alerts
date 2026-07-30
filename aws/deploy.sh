@@ -107,12 +107,12 @@ if "${AWS[@]}" lambda get-function --function-name "${FUNCTION_NAME}" >/dev/null
   "${AWS[@]}" lambda update-function-code --function-name "${FUNCTION_NAME}" --zip-file "fileb://${ZIP_PATH}" >/dev/null
   wait_for_function_updated "${FUNCTION_NAME}"
   "${AWS[@]}" lambda update-function-configuration --function-name "${FUNCTION_NAME}" \
-    --runtime "${RUNTIME}" --handler "${HANDLER}" --timeout 120 --memory-size 256 \
+    --runtime "${RUNTIME}" --handler "${HANDLER}" --timeout 280 --memory-size 256 \
     --environment "file://${ENV_JSON}" >/dev/null
 else
   "${AWS[@]}" lambda create-function --function-name "${FUNCTION_NAME}" \
     --runtime "${RUNTIME}" --handler "${HANDLER}" --role "${ROLE_ARN}" \
-    --zip-file "fileb://${ZIP_PATH}" --timeout 120 --memory-size 256 \
+    --zip-file "fileb://${ZIP_PATH}" --timeout 280 --memory-size 256 \
     --environment "file://${ENV_JSON}" >/dev/null
 fi
 wait_for_function_updated "${FUNCTION_NAME}"

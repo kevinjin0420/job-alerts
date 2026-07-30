@@ -27,9 +27,9 @@ class AppleJobsSource:
     logs a per-source failure instead of blocking other sources.
     """
 
-    name = "apple"
-
     def __init__(self, search_term: str = "intern") -> None:
+        # Hardcoded like GreenhouseSource - always Apple, always intern-titled postings.
+        self.name = "apple:Apple:intern"
         self._search_term = search_term
 
     def _fetch_page(self, page: int) -> list[dict[str, object]]:

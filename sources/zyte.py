@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import html
 import json
 import os
 import re
@@ -12,8 +13,19 @@ from .base import Listing, looks_like_job_posting_url
 
 ZYTE_EXTRACT_URL = "https://api.zyte.com/v1/extract"
 REQUEST_TIMEOUT_SECONDS = 60
-ANCHOR_PATTERN = re.compile(r'<a\s+[^>]*href="([^"]+)"[^>]*>([^<]{4,})</a>', re.IGNORECASE)
+# ponytail: lets lazy-loaded SPAs (e.g. Tesla) render before the snapshot, but only catches their first batch - raise if new postings are missed.
+RENDER_WAIT_SECONDS = 8
+ANCHOR_PATTERN = re.compile(r'<a\s+[^>]*href="([^"]+)"[^>]*>(.*?)</a>', re.IGNORECASE | re.DOTALL)
+HEADING_PATTERN = re.compile(r"<h[1-6][^>]*>(.*?)</h[1-6]>", re.IGNORECASE | re.DOTALL)
+TAG_PATTERN = re.compile(r"<[^>]+>")
 MIN_TITLE_LENGTH = 4
+
+
+def _extract_anchor_title(anchor_inner_html: str) -> str:
+    """Card-style SPAs (e.g. Meta) nest the title in a heading rather than as the anchor's direct text - prefer that when present."""
+    heading_match = HEADING_PATTERN.search(anchor_inner_html)
+    text = heading_match.group(1) if heading_match else anchor_inner_html
+    return " ".join(html.unescape(TAG_PATTERN.sub(" ", text)).split())
 
 
 class ZyteMisconfigured(RuntimeError):
@@ -21,17 +33,7 @@ class ZyteMisconfigured(RuntimeError):
 
 
 class ZyteSource:
-    """Scrapes a company's careers page through Zyte's browser-rendering API -
-    real Chrome execution plus proxy/anti-bot handling, for sites (like
-    Akamai-protected ones) that Jina/DirectSource can't get past.
-
-    ponytail: same "every anchor with title-like text is a candidate posting"
-    heuristic as DirectSource, applied to raw HTML anchors instead of markdown
-    links since Zyte returns browserHtml, not markdown. Costs real money per
-    request (unlike Jina) - callers should throttle how often this source is
-    actually fetched, not run it on the same 5-minute cadence as everything
-    else.
-    """
+    """Scrapes a company's careers page via Zyte's browser-rendering API - handles anti-bot sites Jina/DirectSource can't. Costs real money per request - throttle how often callers actually fetch it."""
 
     def __init__(self, company_name: str, url: str, job_type: str) -> None:
         self.name = f"zyte:{company_name}:{job_type}"
@@ -43,7 +45,13 @@ class ZyteSource:
         if not api_key:
             raise ZyteMisconfigured("ZYTE_API_KEY is not set")
 
-        body = json.dumps({"url": self._url, "browserHtml": True}).encode("utf-8")
+        body = json.dumps(
+            {
+                "url": self._url,
+                "browserHtml": True,
+                "actions": [{"action": "waitForTimeout", "timeout": RENDER_WAIT_SECONDS}],
+            }
+        ).encode("utf-8")
         auth = base64.b64encode(f"{api_key}:".encode("utf-8")).decode("ascii")
         request = urllib.request.Request(
             ZYTE_EXTRACT_URL,
@@ -57,11 +65,11 @@ class ZyteSource:
             elapsed_ms = round((time.monotonic() - started) * 1000)
             print(f"[{self.name}] POST {ZYTE_EXTRACT_URL} for {self._url} -> {response.status} ({elapsed_ms}ms)")
 
-        html = payload.get("browserHtml", "")
+        browser_html = payload.get("browserHtml", "")
         matches: list[Listing] = []
         seen_urls: set[str] = set()
-        for href, title in ANCHOR_PATTERN.findall(html):
-            title = title.strip()
+        for href, inner_html in ANCHOR_PATTERN.findall(browser_html):
+            title = _extract_anchor_title(inner_html)
             if len(title) < MIN_TITLE_LENGTH:
                 continue
             absolute_url = urllib.parse.urljoin(self._url, href)

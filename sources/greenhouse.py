@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 import json
-import re
 
-from .base import Listing, fetch_url
+from .base import INTERNSHIP_TITLE_PATTERN, Listing, fetch_url
 
 REQUEST_TIMEOUT_SECONDS = 30
-INTERNSHIP_TITLE_PATTERN = re.compile(r"\bintern(s|ship)?\b", re.IGNORECASE)
 
 
 class GreenhouseSource:
@@ -18,7 +16,8 @@ class GreenhouseSource:
     """
 
     def __init__(self, company_name: str, board_token: str) -> None:
-        self.name = f"greenhouse:{board_token}"
+        # "intern" hardcoded - this class always filters to intern-titled postings, unlike ashby/direct/zyte/workday.
+        self.name = f"greenhouse:{company_name}:intern"
         self._company_name = company_name
         self._board_token = board_token
 

@@ -93,6 +93,19 @@ __SIDEBAR__
   </main>
 </div>
 
+<div id="urls-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+  <div class="w-full max-w-lg rounded-none border border-neutral-300 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-5">
+    <div class="flex items-center justify-between mb-4">
+      <h3 id="urls-modal-title" class="text-sm font-semibold"></h3>
+      <button id="urls-modal-close"
+        class="text-xs px-2 py-1 rounded-none border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-900">
+        Close
+      </button>
+    </div>
+    <dl id="urls-modal-body" class="space-y-3"></dl>
+  </div>
+</div>
+
 <script src="/shared.js"></script>
 <script>
 async function showApp() {
@@ -149,28 +162,77 @@ document.getElementById("add-company-btn").addEventListener("click", async () =>
   }
 });
 
-// A company's exact source_name isn't always knowable from the catalog alone -
-// ashby/direct/zyte are parameterized per job_type, so a company only gets a
-// concrete name once some user has actually selected a job_type for it (and
-// may end up with multiple, one per job_type). Prefix matching handles that;
-// greenhouse and the flat kinds (community/apple/google) have a single
-// deterministic name, matched exactly.
+// Every per-company source names itself "{kind}:{company_name}:{job_type}" (see sources/*.py); "community" is the one exception, a single shared source with no company suffix.
 function getCompanyHealthRows(company, healthSources) {
   const kind = company.source_kind;
-  if (kind === "greenhouse" && company.board_token) {
-    return healthSources.filter((s) => s.source_name === `greenhouse:${company.board_token}`);
-  }
-  if (kind === "ashby" && company.board_name) {
-    return healthSources.filter((s) => s.source_name.startsWith(`ashby:${company.board_name}:`));
-  }
-  if (kind === "direct" || kind === "zyte") {
-    return healthSources.filter((s) => s.source_name.startsWith(`${kind}:${company.company_name}:`));
-  }
-  if (kind === "community" || kind === "apple" || kind === "google") {
+  if (kind === "community") {
     return healthSources.filter((s) => s.source_name === kind);
   }
-  return [];
+  return healthSources.filter((s) => s.source_name.startsWith(`${kind}:${company.company_name}:`));
 }
+
+function renderUrlField(label, value) {
+  return `
+    <div>
+      <dt class="text-xs uppercase tracking-wide text-neutral-500 dark:text-neutral-500 mb-1">${label}</dt>
+      <dd class="font-mono text-xs break-all ${value ? "" : "text-neutral-400 dark:text-neutral-600"}">${value || "not set"}</dd>
+    </div>
+  `;
+}
+
+// Every kind shows the same four URL fields; Intern/New grad/Full-time fall back to General URL when the company has no distinct page (mirrors watch.py's _job_type_url).
+function sourceConfigFields(company) {
+  const kind = company.source_kind;
+  const effective = (field) => company[field] || company.general_url;
+  const urlFields = [
+    ["Intern URL", effective("intern_url")],
+    ["New grad URL", effective("newgrad_url")],
+    ["Full-time URL", effective("fulltime_url")],
+    ["General URL", company.general_url],
+  ];
+  if (kind === "greenhouse") {
+    return [
+      ...urlFields,
+      ["Board token", company.board_token],
+      ["API URL", company.board_token && `https://boards-api.greenhouse.io/v1/boards/${company.board_token}/jobs`],
+    ];
+  }
+  if (kind === "ashby") {
+    return [
+      ...urlFields,
+      ["Board name", company.board_name],
+      ["API URL", company.board_name && `https://api.ashbyhq.com/posting-api/job-board/${company.board_name}`],
+    ];
+  }
+  if (kind === "workday") {
+    return [...urlFields, ["Board token", company.board_token]];
+  }
+  if (kind === "amazon") {
+    return [...urlFields, ["Fetched via", "https://www.amazon.jobs/en/search.json (fixed, built into the source)"]];
+  }
+  if (kind === "direct" || kind === "zyte" || kind === "apple" || kind === "google") {
+    return urlFields;
+  }
+  // community - single shared scraper, no per-company config at all
+  return [["Config", "Built-in scraper, no per-company URL or token"]];
+}
+
+function showUrlsModal(company) {
+  document.getElementById("urls-modal-title").textContent = `${company.company_name} - Source config`;
+  document.getElementById("urls-modal-body").innerHTML = sourceConfigFields(company)
+    .map(([label, value]) => renderUrlField(label, value))
+    .join("");
+  document.getElementById("urls-modal").classList.remove("hidden");
+}
+
+function hideUrlsModal() {
+  document.getElementById("urls-modal").classList.add("hidden");
+}
+
+document.getElementById("urls-modal-close").addEventListener("click", hideUrlsModal);
+document.getElementById("urls-modal").addEventListener("click", (event) => {
+  if (event.target.id === "urls-modal") hideUrlsModal();
+});
 
 function formatSuccessRate(successCount, failureCount) {
   const total = successCount + failureCount;
@@ -201,8 +263,8 @@ async function loadCompanies() {
   table.innerHTML = `
     <thead>
       <tr class="sticky top-0 bg-white dark:bg-neutral-900 border-b border-neutral-200 dark:border-neutral-800 text-left text-xs uppercase tracking-wide text-neutral-500 dark:text-neutral-500">
-        <th class="px-3 py-2 font-medium w-2/12">Name</th>
-        <th class="px-3 py-2 font-medium w-1/12">Kind</th>
+        <th class="px-3 py-2 font-medium w-1/12">Name</th>
+        <th class="px-3 py-2 font-medium w-3/12">Source</th>
         <th class="px-3 py-2 font-medium w-2/12">Job types</th>
         <th class="px-3 py-2 font-medium w-2/12">Last success</th>
         <th class="px-3 py-2 font-medium w-2/12">Last failure</th>
@@ -219,6 +281,9 @@ async function loadCompanies() {
       .filter((field) => company[field])
       .map((field) => field.replace("_url", ""))
       .join(", ");
+    // Matches the actual source_name prefix from getCompanyHealthRows.
+    const sourceLabel =
+      company.source_kind === "community" ? company.source_kind : `${company.source_kind}:${company.company_name}`;
 
     const healthRows = getCompanyHealthRows(company, healthSources);
     const neverRun = healthRows.length === 0;
@@ -231,13 +296,19 @@ async function loadCompanies() {
 
     row.innerHTML = `
       <td class="px-3 py-2 break-words">${company.company_name}</td>
-      <td class="px-3 py-2">${company.source_kind}</td>
+      <td class="px-3 py-2 font-mono text-xs break-all">${sourceLabel}</td>
       <td class="px-3 py-2 text-neutral-500 dark:text-neutral-500">${jobTypes || "-"}</td>
       <td class="px-3 py-2 font-mono text-xs text-neutral-500 dark:text-neutral-500">${lastSuccess}</td>
       <td class="px-3 py-2 font-mono text-xs text-neutral-500 dark:text-neutral-500">${lastFailure}</td>
       <td class="px-3 py-2">${neverRun ? "-" : formatSuccessRate(successCount, failureCount)}</td>
       <td class="px-3 py-2 text-right"></td>
     `;
+    const urlsBtn = document.createElement("button");
+    urlsBtn.textContent = "Config";
+    urlsBtn.className = "text-xs px-2 py-1 mr-2 rounded-none border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-900";
+    urlsBtn.addEventListener("click", () => showUrlsModal(company));
+    row.lastElementChild.appendChild(urlsBtn);
+
     const removeBtn = document.createElement("button");
     removeBtn.textContent = "Remove";
     removeBtn.className = "text-xs px-2 py-1 rounded-none border border-red-200 dark:border-red-900 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950";
