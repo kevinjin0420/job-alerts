@@ -259,9 +259,7 @@ def _handle_test_classifier(user_id: str, body: dict[str, Any]) -> dict[str, Any
     )
     resume_text = _resolve_resume_text(load_user_profile(user_id))
     try:
-        # Single attempt, tight per-attempt timeout: API Gateway's HTTP API has a
-        # hard, non-configurable 30s integration timeout, unlike watch.py's batch
-        # scan path (a direct Lambda invocation with no such ceiling).
+        # Single attempt, 20s cap - stays under API Gateway's hard 30s integration timeout.
         result = is_good_fit(
             OPENROUTER_API_KEY, classifier_model, fit_prompt, sample, resume_text, max_attempts=1, request_timeout_seconds=20
         )
