@@ -56,7 +56,7 @@ __SIDEBAR__
     <div class="grid lg:grid-cols-2 gap-6 items-start">
       <div class="space-y-6">
         <div class="border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3">
-          <label class="block text-xs font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-500 mb-2">Email recipients</label>
+          <label class="block text-xs font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-500 mb-2">Email recipient</label>
           <div class="flex gap-3">
             <input type="text" id="email-to" placeholder="you@example.com"
               class="flex-1 rounded-none border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-neutral-500">
@@ -69,7 +69,7 @@ __SIDEBAR__
 
         <div class="border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3">
           <label class="block text-xs font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-500 mb-2">Notification channel</label>
-          <p class="text-sm text-neutral-500 dark:text-neutral-500 mb-3">Your <a href="https://ntfy.sh" target="_blank" rel="noopener" class="underline hover:opacity-50">ntfy</a> topic. Treat it like a secret - regenerate if leaked.</p>
+          <p class="text-sm text-neutral-500 dark:text-neutral-500 mb-3">Your <a href="https://ntfy.sh" target="_blank" rel="noopener" class="underline hover:opacity-50">ntfy</a> topic. See <a href="https://github.com/kevinjin0420/job-alerts/blob/main/docs/ntfy-setup.md" target="_blank" rel="noopener" class="underline hover:opacity-50">docs/ntfy-setup.md</a> for setup instructions.</p>
           <div class="flex gap-3">
             <input type="text" id="ntfy-topic" placeholder="job-alerts-xxxxxxxxxxxx"
               class="flex-1 rounded-none border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-neutral-500">
@@ -83,7 +83,7 @@ __SIDEBAR__
 
         <div class="border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3">
           <label class="block text-xs font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-500 mb-2">Agent API key</label>
-          <p class="text-sm text-neutral-500 dark:text-neutral-500 mb-3">For your own agent to read/update this config. See <code>docs/agent-skill.md</code>. Shown once.</p>
+          <p class="text-sm text-neutral-500 dark:text-neutral-500 mb-3">For your own agent to read/update this config. See <a href="https://github.com/kevinjin0420/job-alerts/blob/main/docs/agent-skill.md" target="_blank" rel="noopener" class="underline hover:opacity-50">docs/agent-skill.md</a>. Shown once.</p>
           <div id="api-key-display" class="hidden mb-3 rounded-none border border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 px-3 py-2 text-sm font-mono break-all"></div>
           <button id="generate-api-key-btn"
             class="rounded-none border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-900 text-sm font-medium px-3 py-1.5">

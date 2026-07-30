@@ -59,15 +59,15 @@ __SIDEBAR__
       </div>
     </div>
 
-    <div class="grid lg:grid-cols-2 gap-6 items-start">
-      <div class="space-y-6">
+    <div class="grid lg:grid-cols-3 gap-6 items-start">
+      <div class="lg:col-span-2 flex flex-col gap-6 h-[calc(100vh-160px)]">
         <div class="border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3">
           <label class="block text-xs font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-500 mb-2">Fit prompt</label>
           <textarea id="fit-prompt" rows="22"
             class="w-full rounded-none border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm font-mono leading-6 focus:outline-none focus:ring-1 focus:ring-neutral-500"></textarea>
         </div>
 
-        <div class="border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3">
+        <div class="flex-1 flex flex-col min-h-0 border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3">
           <label class="block text-xs font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-500 mb-2">Prompt tuner</label>
           <p class="text-sm text-neutral-500 dark:text-neutral-500 mb-3">Test the fit prompt above (and classifier model, right) against a sample listing before saving. Uses a real classifier call - counts against your monthly quota.</p>
           <div class="grid sm:grid-cols-2 gap-3 mb-3">
@@ -78,8 +78,8 @@ __SIDEBAR__
             <input type="text" id="tuner-locations" placeholder="Locations (comma separated)"
               class="sm:col-span-2 rounded-none border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-neutral-500">
           </div>
-          <textarea id="tuner-description" rows="4" placeholder="Job description"
-            class="w-full mb-3 rounded-none border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-neutral-500"></textarea>
+          <textarea id="tuner-description" placeholder="Job description"
+            class="w-full mb-3 flex-1 min-h-0 rounded-none border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-neutral-500"></textarea>
           <button id="run-tuner-btn"
             class="rounded-none border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-900 text-sm font-medium px-3 py-1.5">
             Test
@@ -88,21 +88,20 @@ __SIDEBAR__
         </div>
       </div>
 
-      <div class="space-y-6">
-        <div class="border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3">
-          <label class="block text-xs font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-500 mb-2">Companies</label>
-          <input type="text" id="company-search" placeholder="Search companies…"
-            class="w-full rounded-none border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm mb-3 focus:outline-none focus:ring-1 focus:ring-neutral-500">
-          <div id="company-checkboxes"
-            class="max-h-48 overflow-y-auto rounded-none border border-neutral-200 dark:border-neutral-700 divide-y divide-neutral-200 dark:divide-neutral-800"></div>
-        </div>
-
+      <div class="lg:col-span-1 flex flex-col gap-6 h-[calc(100vh-160px)]">
         <div class="border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3">
           <label class="block text-xs font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-500 mb-2">Job types</label>
           <div id="job-type-checkboxes"
             class="rounded-none border border-neutral-200 dark:border-neutral-700 divide-y divide-neutral-200 dark:divide-neutral-800"></div>
         </div>
 
+        <div class="flex-1 flex flex-col min-h-0 border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3">
+          <label class="block text-xs font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-500 mb-2">Companies</label>
+          <input type="text" id="company-search" placeholder="Search companies…"
+            class="w-full rounded-none border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm mb-3 focus:outline-none focus:ring-1 focus:ring-neutral-500">
+          <div id="company-checkboxes"
+            class="flex-1 min-h-0 overflow-y-auto rounded-none border border-neutral-200 dark:border-neutral-700 divide-y divide-neutral-200 dark:divide-neutral-800"></div>
+        </div>
       </div>
     </div>
   </main>
@@ -115,6 +114,54 @@ async function showApp() {
   await setupNav();
   loadConfig();
 }
+
+const TUNER_STORAGE_KEY = "job-alerts-tuner-fields";
+const DEFAULT_TUNER_SAMPLE = {
+  company: "Google",
+  title: "Software Engineering Intern, Summer 2027",
+  locations: "Mountain View, CA, USA",
+  description:
+    "Google is seeking a Software Engineering Intern for Summer 2027. As an intern, you'll work on real projects " +
+    "critical to Google's needs, with opportunities to develop knowledge and skills in your areas of interest.\n\n" +
+    "Minimum qualifications:\n" +
+    "- Currently pursuing a Bachelor's degree in Computer Science or a related technical field.\n" +
+    "- Experience with Data Structures and Algorithms.\n" +
+    "- Experience coding in one or more general purpose languages (e.g. Java, C/C++, Python, Go).\n\n" +
+    "Preferred qualifications:\n" +
+    "- Experience developing accessible technologies.\n" +
+    "- Ability to speak and write in English fluently.\n\n" +
+    "About the job:\n" +
+    "As a Software Engineering Intern, you'll specialize in the design, development, and technical leadership of " +
+    "software products used by millions of people, using your knowledge and experience in areas such as full-stack, " +
+    "back-end, front-end, mobile, algorithms, infrastructure, developer tools, distributed systems, or security.",
+};
+const TUNER_FIELD_IDS = { company: "tuner-company", title: "tuner-title", locations: "tuner-locations", description: "tuner-description" };
+
+function loadTunerFields() {
+  let saved = null;
+  try {
+    saved = JSON.parse(localStorage.getItem(TUNER_STORAGE_KEY) || "null");
+  } catch (error) {
+    saved = null;
+  }
+  const fields = saved || DEFAULT_TUNER_SAMPLE;
+  for (const [key, id] of Object.entries(TUNER_FIELD_IDS)) {
+    document.getElementById(id).value = fields[key] || "";
+  }
+}
+
+function saveTunerFields() {
+  const fields = {};
+  for (const [key, id] of Object.entries(TUNER_FIELD_IDS)) {
+    fields[key] = document.getElementById(id).value;
+  }
+  localStorage.setItem(TUNER_STORAGE_KEY, JSON.stringify(fields));
+}
+
+for (const id of Object.values(TUNER_FIELD_IDS)) {
+  document.getElementById(id).addEventListener("input", saveTunerFields);
+}
+loadTunerFields();
 
 document.getElementById("run-tuner-btn").addEventListener("click", async () => {
   const result = document.getElementById("tuner-result");
