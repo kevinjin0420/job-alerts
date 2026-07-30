@@ -94,7 +94,19 @@ __SIDEBAR__
         </div>
 
         <div class="flex-1 flex flex-col min-h-0 border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3">
-          <label class="block text-xs font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-500 mb-2">Companies</label>
+          <div class="flex items-center justify-between mb-2">
+            <label class="block text-xs font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-500">Companies</label>
+            <div class="flex gap-2">
+              <button type="button" id="select-all-companies-btn"
+                class="text-xs px-2 py-1 rounded-none border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-900">
+                Select all
+              </button>
+              <button type="button" id="deselect-all-companies-btn"
+                class="text-xs px-2 py-1 rounded-none border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-900">
+                Deselect all
+              </button>
+            </div>
+          </div>
           <input type="text" id="company-search" placeholder="Search companies…"
             class="w-full rounded-none border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm mb-3 focus:outline-none focus:ring-1 focus:ring-neutral-500">
           <div id="company-checkboxes"
@@ -213,6 +225,18 @@ function renderCheckboxes(container, options, selected, idPrefix) {
 function checkedValues(container) {
   return Array.from(container.querySelectorAll("input[type=checkbox]:checked")).map((input) => input.value);
 }
+
+function setVisibleCompanyCheckboxes(checked) {
+  const container = document.getElementById("company-checkboxes");
+  for (const row of container.children) {
+    if (row.dataset.optionLabel === undefined || row.classList.contains("hidden")) continue;
+    const checkbox = row.querySelector("input[type=checkbox]");
+    if (checkbox) checkbox.checked = checked;
+  }
+}
+
+document.getElementById("select-all-companies-btn").addEventListener("click", () => setVisibleCompanyCheckboxes(true));
+document.getElementById("deselect-all-companies-btn").addEventListener("click", () => setVisibleCompanyCheckboxes(false));
 
 document.getElementById("company-search").addEventListener("input", (event) => {
   const query = event.target.value.trim().toLowerCase();

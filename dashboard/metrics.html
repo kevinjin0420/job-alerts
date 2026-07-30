@@ -72,11 +72,15 @@ __SIDEBAR__
 
   <main class="flex-1 p-6">
     <div class="flex items-baseline justify-between mb-6">
-      <h2 class="text-xs font-semibold tracking-widest uppercase text-neutral-500 dark:text-neutral-500">Metrics &middot; last 24h</h2>
-      <button id="refresh-btn"
-        class="text-xs px-3 py-1.5 rounded-none border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-900">
-        Refresh
-      </button>
+      <h2 id="metrics-heading" class="text-xs font-semibold tracking-widest uppercase text-neutral-500 dark:text-neutral-500">Metrics &middot; last 24h</h2>
+      <div class="flex items-center gap-3">
+        <select id="range-select"
+          class="text-xs px-2 py-1.5 rounded-none border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 focus:outline-none focus:ring-1 focus:ring-neutral-500"></select>
+        <button id="refresh-btn"
+          class="text-xs px-3 py-1.5 rounded-none border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-900">
+          Refresh
+        </button>
+      </div>
     </div>
 
     <div id="metric-sections" class="space-y-8"></div>
@@ -86,7 +90,8 @@ __SIDEBAR__
       <div class="grid gap-6 xl:grid-cols-2">
         <figure id="chart-duration" class="viz-root border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 px-4 py-4"></figure>
         <figure id="chart-backlog" class="viz-root border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 px-4 py-4"></figure>
-        <figure id="chart-throughput" class="viz-root border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 px-4 py-4 xl:col-span-2"></figure>
+        <figure id="chart-throughput" class="viz-root border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 px-4 py-4"></figure>
+        <figure id="chart-token-usage" class="viz-root border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 px-4 py-4"></figure>
       </div>
     </section>
   </main>
@@ -97,6 +102,56 @@ __SIDEBAR__
 // matches aws/config.env's SCHEDULE_RATE
 const SCHEDULE_INTERVAL_SECONDS = 300;
 let nextRunAt = null;
+
+// Mirrors dashboard/app.py's METRICS_RANGE_PRESETS_MINUTES - keep both in sync.
+const RANGE_OPTIONS = [
+  { value: "5m", label: "5 minutes", minutes: 5 },
+  { value: "10m", label: "10 minutes", minutes: 10 },
+  { value: "15m", label: "15 minutes", minutes: 15 },
+  { value: "30m", label: "30 minutes", minutes: 30 },
+  { value: "1h", label: "1 hour", minutes: 60 },
+  { value: "2h", label: "2 hours", minutes: 120 },
+  { value: "3h", label: "3 hours", minutes: 180 },
+  { value: "6h", label: "6 hours", minutes: 360 },
+  { value: "12h", label: "12 hours", minutes: 720 },
+  { value: "24h", label: "24 hours", minutes: 1440 },
+  { value: "2d", label: "2 days", minutes: 2880 },
+  { value: "3d", label: "3 days", minutes: 4320 },
+  { value: "1w", label: "1 week", minutes: 10080 },
+];
+const DEFAULT_RANGE = "24h";
+const RANGE_STORAGE_KEY = "job-alerts-metrics-range";
+
+function populateRangeSelect() {
+  const select = document.getElementById("range-select");
+  select.innerHTML = "";
+  for (const option of RANGE_OPTIONS) {
+    const el = document.createElement("option");
+    el.value = option.value;
+    el.textContent = `Last ${option.label}`;
+    select.appendChild(el);
+  }
+  const stored = localStorage.getItem(RANGE_STORAGE_KEY);
+  select.value = RANGE_OPTIONS.some((option) => option.value === stored) ? stored : DEFAULT_RANGE;
+}
+
+function currentRange() {
+  const selected = document.getElementById("range-select").value;
+  return RANGE_OPTIONS.find((option) => option.value === selected) || RANGE_OPTIONS.find((option) => option.value === DEFAULT_RANGE);
+}
+
+function updateMetricsHeading() {
+  document.getElementById("metrics-heading").textContent = `Metrics · last ${currentRange().label}`;
+}
+
+populateRangeSelect();
+updateMetricsHeading();
+
+document.getElementById("range-select").addEventListener("change", () => {
+  localStorage.setItem(RANGE_STORAGE_KEY, document.getElementById("range-select").value);
+  updateMetricsHeading();
+  if (token()) loadMetrics();
+});
 
 function formatLocalDate(value) {
   const date = new Date(value);
@@ -134,9 +189,9 @@ function buildSections(metrics, listingCounts) {
     {
       title: "Execution",
       cards: [
-        ["Invocations", formatNumber(metrics.invocations_24h)],
-        ["Errors", formatNumber(metrics.errors_24h)],
-        ["Success rate", formatPercent(metrics.invocations_24h - metrics.errors_24h, metrics.invocations_24h)],
+        ["Invocations", formatNumber(metrics.invocations)],
+        ["Errors", formatNumber(metrics.errors)],
+        ["Success rate", formatPercent(metrics.invocations - metrics.errors, metrics.invocations)],
         ["Avg duration (ms)", formatNumber(metrics.avg_duration_ms)],
       ],
     },
@@ -370,16 +425,26 @@ function renderCharts(metrics) {
     metrics.throughput_series || [],
     { yFormat: (value) => Math.round(value), yAxisLabel: "Listings" },
   );
+  renderChartCard(
+    "chart-token-usage", "Token usage",
+    [
+      { key: "input_tokens", label: "Input tokens", color: colors.series1 },
+      { key: "output_tokens", label: "Output tokens", color: colors.series2 },
+    ],
+    metrics.token_usage_series || [],
+    { yFormat: (value) => Math.round(value).toLocaleString(), yAxisLabel: "Tokens" },
+  );
 }
 
 async function loadMetrics() {
   const container = document.getElementById("metric-sections");
   renderMessage(container, "Loading…", "text-neutral-500 dark:text-neutral-500");
+  const range = currentRange();
   let metrics, listingCounts;
   try {
     const [metricsResponse, listingsResponse] = await Promise.all([
-      apiFetch("/api/metrics"),
-      apiFetch("/api/listings"),
+      apiFetch(`/api/metrics?range=${encodeURIComponent(range.value)}`),
+      apiFetch(`/api/listings?range=${encodeURIComponent(range.value)}`),
     ]);
     metrics = await metricsResponse.json();
     const { listings } = await listingsResponse.json();

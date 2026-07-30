@@ -93,7 +93,12 @@ def record_listings(user_id: str, entries: list[tuple[Listing, str, str, int | N
         _dynamodb.put_item(TableName=SEEN_LISTINGS_TABLE, Item=item)
 
 
-def list_seen_listings(user_id: str, limit: int = 300) -> list[dict[str, Any]]:
+def list_seen_listings(user_id: str, limit: int = 300, since: float | None = None) -> list[dict[str, Any]]:
+    """since (unix seconds) returns every matching item regardless of limit - for
+    callers that need a complete count within a time window (metrics.html's range
+    selector), not just the most recent N. The full per-user scan already happens
+    either way (DynamoDB has no time-range index here), so filtering by since adds
+    no extra query cost - it only changes what gets kept after sorting."""
     items: list[dict[str, Any]] = []
     kwargs: dict[str, Any] = {
         "TableName": SEEN_LISTINGS_TABLE,
@@ -107,6 +112,8 @@ def list_seen_listings(user_id: str, limit: int = 300) -> list[dict[str, Any]]:
             break
         kwargs["ExclusiveStartKey"] = response["LastEvaluatedKey"]
     items.sort(key=lambda item: item.get("seen_at", 0), reverse=True)
+    if since is not None:
+        return [item for item in items if item.get("seen_at", 0) >= since]
     return items[:limit]
 
 

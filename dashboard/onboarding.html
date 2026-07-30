@@ -136,7 +136,7 @@ async function showApp() {
     return;
   }
   if (me.onboarding_completed) {
-    window.location.href = "/metrics";
+    window.location.href = "/listings";
     return;
   }
   document.getElementById("onboarding-ntfy-topic").textContent = me.ntfy_topic;
@@ -244,7 +244,7 @@ document.getElementById("finish-btn").addEventListener("click", async () => {
       body: JSON.stringify({ ntfy_topic: ntfyTopic }),
     });
     await apiFetch("/api/onboarding/complete", { method: "POST" });
-    window.location.href = "/metrics";
+    window.location.href = "/listings";
   } catch (error) {
     status.textContent = "";
     errorEl.textContent = "Failed to save - try again.";

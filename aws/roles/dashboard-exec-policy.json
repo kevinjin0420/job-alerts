@@ -10,7 +10,12 @@
     {
       "Sid": "ReadWatchLogs",
       "Effect": "Allow",
-      "Action": "logs:FilterLogEvents",
+      "Action": [
+        "logs:FilterLogEvents",
+        "logs:StartQuery",
+        "logs:StopQuery",
+        "logs:GetQueryResults"
+      ],
       "Resource": "arn:aws:logs:*:863516093571:log-group:/aws/lambda/job-alerts-watch:*"
     },
     {

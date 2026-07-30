@@ -52,7 +52,7 @@ async function setupNav() {
 }
 
 // For admin-only pages: redirects to /onboarding if setup isn't finished,
-// then to /metrics for non-admins. Returns whether the current user is an
+// then to /listings for non-admins. Returns whether the current user is an
 // admin (false means the caller should stop).
 async function requireAdmin() {
   const response = await apiFetch("/api/me");
@@ -62,7 +62,7 @@ async function requireAdmin() {
     return false;
   }
   if (!me.is_admin) {
-    window.location.href = "/metrics";
+    window.location.href = "/listings";
     return false;
   }
   revealAdminNav(true);
