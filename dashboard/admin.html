@@ -69,7 +69,7 @@ __SIDEBAR__
       <p id="add-user-status" class="mt-2 text-sm text-neutral-500 dark:text-neutral-500"></p>
     </div>
 
-    <div id="users-table" class="border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 mb-10"></div>
+    <div id="users-table" class="border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 mb-10 max-h-[calc(100vh-160px)] overflow-y-auto overflow-x-hidden"></div>
 
     <h2 class="text-xs font-semibold tracking-widest uppercase text-neutral-500 dark:text-neutral-500 mb-6">Global settings</h2>
     <div class="max-w-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3">
@@ -199,15 +199,15 @@ async function loadUsers() {
   }
 
   const table = document.createElement("table");
-  table.className = "w-full text-sm";
+  table.className = "w-full table-fixed border-collapse text-sm";
   table.innerHTML = `
     <thead>
-      <tr class="border-b border-neutral-200 dark:border-neutral-800 text-left text-xs uppercase tracking-wide text-neutral-500 dark:text-neutral-500">
-        <th class="px-3 py-2 font-medium">Email</th>
-        <th class="px-3 py-2 font-medium">Role</th>
-        <th class="px-3 py-2 font-medium">Calls this month</th>
-        <th class="px-3 py-2 font-medium">ntfy topic</th>
-        <th class="px-3 py-2 font-medium"></th>
+      <tr class="sticky top-0 bg-white dark:bg-neutral-900 border-b border-neutral-200 dark:border-neutral-800 text-left text-xs uppercase tracking-wide text-neutral-500 dark:text-neutral-500">
+        <th class="px-3 py-2 font-medium w-[34%]">Email</th>
+        <th class="px-3 py-2 font-medium w-[12%]">Role</th>
+        <th class="px-3 py-2 font-medium w-[16%]">Calls this month</th>
+        <th class="px-3 py-2 font-medium w-[28%]">ntfy topic</th>
+        <th class="px-3 py-2 font-medium w-[10%]"></th>
       </tr>
     </thead>
   `;
@@ -216,10 +216,10 @@ async function loadUsers() {
     const row = document.createElement("tr");
     row.className = "border-b border-neutral-100 dark:border-neutral-900 last:border-0";
     row.innerHTML = `
-      <td class="px-3 py-2 font-mono">${user.user_id}</td>
+      <td class="px-3 py-2 break-words font-mono">${user.user_id}</td>
       <td class="px-3 py-2">${user.is_admin ? "Admin" : "User"}</td>
       <td class="px-3 py-2 font-mono">${user.monthly_classifier_calls}</td>
-      <td class="px-3 py-2 font-mono">${user.ntfy_topic || "-"}</td>
+      <td class="px-3 py-2 break-words font-mono">${user.ntfy_topic || "-"}</td>
       <td class="px-3 py-2 text-right"></td>
     `;
     if (!user.is_admin) {

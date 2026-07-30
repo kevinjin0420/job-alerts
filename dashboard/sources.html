@@ -89,7 +89,7 @@ __SIDEBAR__
       <p id="add-company-status" class="mt-2 text-sm text-neutral-500 dark:text-neutral-500"></p>
     </div>
 
-    <div id="companies-table" class="border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900"></div>
+    <div id="companies-table" class="border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 max-h-[calc(100vh-160px)] overflow-y-auto overflow-x-hidden"></div>
   </main>
 </div>
 
@@ -197,18 +197,18 @@ async function loadCompanies() {
     return;
   }
   const table = document.createElement("table");
-  table.className = "w-full text-sm";
+  table.className = "w-full table-fixed border-collapse text-sm";
   table.innerHTML = `
     <thead>
-      <tr class="border-b border-neutral-200 dark:border-neutral-800 text-left text-xs uppercase tracking-wide text-neutral-500 dark:text-neutral-500">
-        <th class="px-3 py-2 font-medium">Name</th>
-        <th class="px-3 py-2 font-medium">Kind</th>
-        <th class="px-3 py-2 font-medium">Job types</th>
-        <th class="px-3 py-2 font-medium">Details</th>
-        <th class="px-3 py-2 font-medium">Last success</th>
-        <th class="px-3 py-2 font-medium">Last failure</th>
-        <th class="px-3 py-2 font-medium">Success rate</th>
-        <th class="px-3 py-2 font-medium"></th>
+      <tr class="sticky top-0 bg-white dark:bg-neutral-900 border-b border-neutral-200 dark:border-neutral-800 text-left text-xs uppercase tracking-wide text-neutral-500 dark:text-neutral-500">
+        <th class="px-3 py-2 font-medium w-[13%]">Name</th>
+        <th class="px-3 py-2 font-medium w-[9%]">Kind</th>
+        <th class="px-3 py-2 font-medium w-[11%]">Job types</th>
+        <th class="px-3 py-2 font-medium w-[20%]">Details</th>
+        <th class="px-3 py-2 font-medium w-[13%]">Last success</th>
+        <th class="px-3 py-2 font-medium w-[13%]">Last failure</th>
+        <th class="px-3 py-2 font-medium w-[9%]">Success rate</th>
+        <th class="px-3 py-2 font-medium w-[12%]"></th>
       </tr>
     </thead>
   `;
@@ -231,10 +231,10 @@ async function loadCompanies() {
     const lastFailure = neverRun ? "Never run" : lastFailureAt ? new Date(lastFailureAt * 1000).toISOString().replace(/\.\d{3}Z$/, "Z") : "-";
 
     row.innerHTML = `
-      <td class="px-3 py-2">${company.company_name}</td>
+      <td class="px-3 py-2 break-words">${company.company_name}</td>
       <td class="px-3 py-2">${company.source_kind}</td>
       <td class="px-3 py-2 text-neutral-500 dark:text-neutral-500">${jobTypes || "-"}</td>
-      <td class="px-3 py-2 font-mono text-xs text-neutral-500 dark:text-neutral-500">${company.board_token || company.board_name || "-"}</td>
+      <td class="px-3 py-2 break-words font-mono text-xs text-neutral-500 dark:text-neutral-500">${company.board_token || company.board_name || "-"}</td>
       <td class="px-3 py-2 font-mono text-xs text-neutral-500 dark:text-neutral-500">${lastSuccess}</td>
       <td class="px-3 py-2 font-mono text-xs text-neutral-500 dark:text-neutral-500">${lastFailure}</td>
       <td class="px-3 py-2">${neverRun ? "-" : formatSuccessRate(successCount, failureCount)}</td>

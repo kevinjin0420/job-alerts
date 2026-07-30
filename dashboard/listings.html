@@ -64,7 +64,7 @@ __SIDEBAR__
       </div>
     </div>
 
-    <div id="listings-table" class="border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900"></div>
+    <div id="listings-table" class="border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 max-h-[calc(100vh-160px)] overflow-y-auto overflow-x-hidden"></div>
   </main>
 </div>
 
@@ -106,34 +106,38 @@ function renderListings() {
   }
 
   const table = document.createElement("table");
-  table.className = "w-full text-sm";
+  table.className = "w-full table-fixed border-collapse text-sm";
   table.innerHTML = `
     <thead>
-      <tr class="border-b border-neutral-200 dark:border-neutral-800 text-left text-xs uppercase tracking-wide text-neutral-500 dark:text-neutral-500">
-        <th class="px-3 py-2 font-medium">Company</th>
-        <th class="px-3 py-2 font-medium">Title</th>
-        <th class="px-3 py-2 font-medium">Status</th>
-        <th class="px-3 py-2 font-medium">Reason</th>
-        <th class="px-3 py-2 font-medium">Fit score</th>
-        <th class="px-3 py-2 font-medium">Seen</th>
-        <th class="px-3 py-2 font-medium"></th>
+      <tr class="sticky top-0 bg-white dark:bg-neutral-900 border-b border-neutral-200 dark:border-neutral-800 text-left text-xs uppercase tracking-wide text-neutral-500 dark:text-neutral-500">
+        <th class="px-3 py-2 font-medium w-[9%]">Company</th>
+        <th class="px-3 py-2 font-medium w-[24%]">Title</th>
+        <th class="px-3 py-2 font-medium w-[8%]">Status</th>
+        <th class="px-3 py-2 font-medium w-[29%]">Reason</th>
+        <th class="px-3 py-2 font-medium w-[7%]">Fit score</th>
+        <th class="px-3 py-2 font-medium w-[12%]">Seen</th>
+        <th class="px-3 py-2 font-medium w-[11%]"></th>
       </tr>
     </thead>
   `;
   const tbody = document.createElement("tbody");
   for (const item of listings) {
     const row = document.createElement("tr");
-    row.className = "border-b border-neutral-100 dark:border-neutral-900 last:border-0";
+    row.className = "border-b border-neutral-200 dark:border-neutral-800 last:border-0";
     const title = item.title || "(unknown - seen before this tracking existed)";
     const titleCell = item.url ? `<a href="${item.url}" target="_blank" class="hover:underline">${title}</a>` : title;
     row.innerHTML = `
-      <td class="px-3 py-2">${item.company_name || "-"}</td>
-      <td class="px-3 py-2">${titleCell}</td>
-      <td class="px-3 py-2 ${STATUS_STYLES[item.status] || ""}">${item.status || "legacy"}</td>
-      <td class="px-3 py-2 text-neutral-500 dark:text-neutral-500">${item.reason || "-"}</td>
-      <td class="px-3 py-2 font-mono text-xs text-neutral-500 dark:text-neutral-500">${item.fit_score ?? "-"}</td>
-      <td class="px-3 py-2 font-mono text-xs text-neutral-500 dark:text-neutral-500">${item.seen_at ? isoTime(item.seen_at) : "-"}</td>
-      <td class="px-3 py-2 text-right"></td>
+      <td class="px-3 py-2 align-middle break-words">${item.company_name || "-"}</td>
+      <td class="px-3 py-2 align-middle break-words">
+        <div class="min-h-[3.75rem] flex items-center"><span class="line-clamp-3">${titleCell}</span></div>
+      </td>
+      <td class="px-3 py-2 align-middle ${STATUS_STYLES[item.status] || ""}">${item.status || "legacy"}</td>
+      <td class="px-3 py-2 align-middle break-words text-neutral-500 dark:text-neutral-500">
+        <div class="min-h-[3.75rem] flex items-center"><span class="line-clamp-3">${item.reason || "-"}</span></div>
+      </td>
+      <td class="px-3 py-2 align-middle font-mono text-xs text-neutral-500 dark:text-neutral-500">${item.fit_score ?? "-"}</td>
+      <td class="px-3 py-2 align-middle font-mono text-xs text-neutral-500 dark:text-neutral-500">${item.seen_at ? isoTime(item.seen_at) : "-"}</td>
+      <td class="px-3 py-2 align-middle text-right"></td>
     `;
     if (item.status === "dismissed") {
       const retryBtn = document.createElement("button");
