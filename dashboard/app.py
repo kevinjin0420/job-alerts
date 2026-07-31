@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import concurrent.futures
 import json
+import mimetypes
 import os
 import secrets
 import time
@@ -69,45 +70,26 @@ dynamodb_client = boto3.client("dynamodb")
 cognito_client = boto3.client("cognito-idp")
 lambda_client = boto3.client("lambda")
 
-_SIDEBAR_TEMPLATE = (Path(__file__).parent / "sidebar.html").read_text()
-_DEFAULT_NAV_CLASS = "px-3 py-2 rounded-none text-neutral-600 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-900"
-_ACTIVE_NAV_CLASS = "px-3 py-2 rounded-none font-medium bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900"
-
-
-def _render_sidebar(active_path: str) -> str:
-    html = _SIDEBAR_TEMPLATE
-    # The admin-only links (Logs/Sources/Admin) also carry a "hidden" prefix -
-    # they start hidden regardless of which page is active and are revealed
-    # client-side once /api/me confirms admin, so both variants need handling.
-    for default_class, active_class in (
-        (_DEFAULT_NAV_CLASS, _ACTIVE_NAV_CLASS),
-        (f"hidden {_DEFAULT_NAV_CLASS}", f"hidden {_ACTIVE_NAV_CLASS}"),
-    ):
-        html = html.replace(
-            f'data-nav="{active_path}" class="{default_class}"',
-            f'data-nav="{active_path}" class="{active_class}"',
-        )
-    return html
-
-
-# Each page's __SIDEBAR__ placeholder is substituted once here, at cold start -
-# same "compute once, serve free" pattern as the rest of PAGES, so splitting
-# the sidebar out doesn't add any per-request cost.
-PAGES = {
-    path: (Path(__file__).parent / filename).read_text().replace("__SIDEBAR__", _render_sidebar(path))
-    for path, filename in {
-        "/metrics": "metrics.html",
-        "/listings": "listings.html",
-        "/config": "config.html",
-        "/logs": "logs.html",
-        "/admin": "admin.html",
-        "/activity": "activity.html",
-        "/sources": "sources.html",
-        "/profile": "profile.html",
-        "/onboarding": "onboarding.html",
-    }.items()
-}
-SHARED_JS = (Path(__file__).parent / "shared.js").read_text()
+# The built SPA, read once at cold start and served from memory - same "compute
+# once, serve free" pattern the old per-page HTML used. deploy_dashboard.sh
+# stages it next to app.py; the frontend/ path is the local checkout layout, so
+# importing this module outside Lambda (tests) still works.
+_DIST_DIR = next(
+    (
+        candidate
+        for candidate in (Path(__file__).parent / "dist", Path(__file__).parent.parent / "frontend" / "dist")
+        if candidate.is_dir()
+    ),
+    None,
+)
+SPA_INDEX_HTML: bytes | None = (
+    (_DIST_DIR / "index.html").read_bytes() if _DIST_DIR and (_DIST_DIR / "index.html").is_file() else None
+)
+SPA_ASSETS: dict[str, bytes] = (
+    {f"/assets/{asset.name}": asset.read_bytes() for asset in (_DIST_DIR / "assets").iterdir() if asset.is_file()}
+    if _DIST_DIR and (_DIST_DIR / "assets").is_dir()
+    else {}
+)
 
 FAILURE_MARKERS = ("fail", "Fail", "FAIL", "Error", "ERROR", "Traceback")
 # These lines embed the classifier's free-text reasoning, which often contains "fail"/"Error" as ordinary words (e.g. "Fails multiple criteria") - not an actual failure.
@@ -118,12 +100,15 @@ def handler(event: dict[str, Any], _context: object) -> dict[str, Any]:
     method = event["requestContext"]["http"]["method"]
     path = event["rawPath"]
 
-    if method == "GET" and path == "/":
-        return _redirect("/listings")
-    if method == "GET" and path == "/shared.js":
-        return _response(200, "application/javascript", SHARED_JS)
-    if method == "GET" and path in PAGES:
-        return _response(200, "text/html", PAGES[path])
+    if method == "GET" and path in SPA_ASSETS:
+        # Vite content-hashes every asset filename, so a given URL is immutable.
+        return _asset_response(SPA_ASSETS[path], path, "public, max-age=31536000, immutable")
+    if method == "GET" and not path.startswith("/api/"):
+        # SPA fallback - the client-side router owns every non-API path. index.html
+        # must not be cached or a deploy's new asset hashes are never picked up.
+        if SPA_INDEX_HTML is None:
+            return _json_response(500, {"error": "frontend bundle missing - run npm run build in frontend/"})
+        return _asset_response(SPA_INDEX_HTML, "index.html", "no-cache")
 
     source_ip = event["requestContext"]["http"]["sourceIp"]
     headers = {key.lower(): value for key, value in (event.get("headers") or {}).items()}
@@ -132,6 +117,12 @@ def handler(event: dict[str, Any], _context: object) -> dict[str, Any]:
         if _is_rate_limited(source_ip):
             return _json_response(429, {"error": "too many failed attempts, try again later"})
         return _handle_login(json.loads(event.get("body") or "{}"), source_ip)
+
+    # Authenticated by the refresh token in the body, not a bearer header, so it sits above _authenticate.
+    if method == "POST" and path == "/api/refresh":
+        if _is_rate_limited(source_ip):
+            return _json_response(429, {"error": "too many failed attempts, try again later"})
+        return _handle_refresh(json.loads(event.get("body") or "{}"), source_ip)
 
     user = _authenticate(headers)
     if user is None:
@@ -205,7 +196,7 @@ def handler(event: dict[str, Any], _context: object) -> dict[str, Any]:
         return _json_response(200, config)
     if method == "PUT" and path == "/api/config":
         # Merge onto the current item rather than overwriting it outright -
-        # config.html and profile.html (email_to) both PUT here with only the
+        # The Config and Profile (email_to) pages both PUT here with only the
         # fields they own; a blind overwrite from either would wipe the other's.
         current_config = load_user_config(user_id)
         current_config.update(json.loads(event.get("body") or "{}"))
@@ -392,7 +383,32 @@ def _handle_login(body: dict[str, Any], source_ip: str) -> dict[str, Any]:
 
 
 def _tokens_from_auth_result(auth_result: dict[str, Any]) -> dict[str, Any]:
-    return {"access_token": auth_result["AccessToken"], "expires_in": auth_result["ExpiresIn"]}
+    tokens: dict[str, Any] = {"access_token": auth_result["AccessToken"], "expires_in": auth_result["ExpiresIn"]}
+    # Absent on a REFRESH_TOKEN_AUTH result - Cognito does not reissue one, the caller keeps what it has.
+    refresh_token = auth_result.get("RefreshToken")
+    if refresh_token:
+        tokens["refresh_token"] = refresh_token
+    return tokens
+
+
+def _handle_refresh(body: dict[str, Any], source_ip: str) -> dict[str, Any]:
+    """Exchanges a refresh token for a fresh access token. The refresh token is
+    the credential here, so a failure counts against the same per-IP budget as a
+    failed password login rather than being unmetered."""
+    refresh_token = str(body.get("refresh_token", "")).strip()
+    if not refresh_token:
+        return _json_response(400, {"error": "refresh_token is required"})
+    try:
+        response = cognito_client.initiate_auth(
+            ClientId=CLIENT_ID,
+            AuthFlow="REFRESH_TOKEN_AUTH",
+            AuthParameters={"REFRESH_TOKEN": refresh_token},
+        )
+    except ClientError:
+        _record_failed_auth(source_ip)
+        return _json_response(401, {"error": "invalid or expired refresh token"})
+    _clear_failed_auth(source_ip)
+    return _json_response(200, _tokens_from_auth_result(response["AuthenticationResult"]))
 
 
 def _handle_admin(method: str, path: str, event: dict[str, Any], admin_user_id: str) -> dict[str, Any]:
@@ -855,7 +871,7 @@ _metrics_cache: dict[int, tuple[float, dict[str, Any]]] = {}
 
 def _recent_metrics(minutes: int = 1440) -> dict[str, Any]:
     """Cached in-process for METRICS_CACHE_TTL_SECONDS, keyed by the selected
-    window - metrics.html polls this every 60s, and the underlying CloudWatch
+    window - the Metrics page polls this every 60s, and the underlying CloudWatch
     Logs Insights queries can each take several seconds against a growing log
     group, so re-running the full fetch on every single request (auto-refresh,
     multiple admins, page reloads) was doing a lot of redundant expensive work
@@ -902,8 +918,17 @@ def _recent_metrics(minutes: int = 1440) -> dict[str, Any]:
     return result
 
 
-def _redirect(location: str) -> dict[str, Any]:
-    return {"statusCode": 302, "headers": {"location": location}, "body": ""}
+def _asset_response(body: bytes, filename: str, cache_control: str) -> dict[str, Any]:
+    """Base64 for every asset regardless of type - HTTP APIs decode it before it
+    reaches the client, so one path covers text and any future binary asset
+    instead of silently corrupting whatever falls outside a text allowlist."""
+    content_type, _ = mimetypes.guess_type(filename)
+    return {
+        "statusCode": 200,
+        "headers": {"content-type": content_type or "application/octet-stream", "cache-control": cache_control},
+        "body": base64.b64encode(body).decode("ascii"),
+        "isBase64Encoded": True,
+    }
 
 
 def _json_default(value: Any) -> Any:

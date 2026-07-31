@@ -95,8 +95,8 @@ def record_listings(user_id: str, entries: list[tuple[Listing, str, str, int | N
 
 def list_seen_listings(user_id: str, limit: int = 300, since: float | None = None) -> list[dict[str, Any]]:
     """since (unix seconds) returns every matching item regardless of limit - for
-    callers that need a complete count within a time window (metrics.html's range
-    selector), not just the most recent N. The full per-user scan already happens
+    callers that need a complete count within a time window (the Metrics page's
+    range selector), not just the most recent N. The full per-user scan already happens
     either way (DynamoDB has no time-range index here), so filtering by since adds
     no extra query cost - it only changes what gets kept after sorting."""
     items: list[dict[str, Any]] = []

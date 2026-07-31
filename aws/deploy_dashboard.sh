@@ -58,9 +58,15 @@ STAGE_DIR="$(mktemp -d)"
 ZIP_PATH="$(mktemp -u /tmp/job-alerts-dashboard-XXXXXX).zip"
 trap 'rm -rf "${STAGE_DIR}" "${ZIP_PATH}"' EXIT
 cp "${REPO_ROOT}/dashboard/app.py" "${STAGE_DIR}/"
-# Globbed, not a hand-maintained list - a missing page here crashes the whole Lambda at import time (app.py reads PAGES eagerly at cold start), not just that page.
-cp "${REPO_ROOT}"/dashboard/*.html "${REPO_ROOT}/dashboard/shared.js" "${STAGE_DIR}/"
 cp "${REPO_ROOT}/config.py" "${REPO_ROOT}/users.py" "${REPO_ROOT}/classifier.py" "${REPO_ROOT}/resume.py" "${REPO_ROOT}/notifiers.py" "${STAGE_DIR}/"
+
+# npm ci (not install) so a deploy builds from the committed lockfile. `check`
+# runs the typecheck and unit tests; `build` would catch type errors on its own
+# but not a broken parser, and a bad bundle is only visible after it is live.
+echo "==> Building frontend"
+(cd "${REPO_ROOT}/frontend" && npm ci && npm run check && npm run build)
+# app.py reads dist/ eagerly at cold start, so a missing build breaks every route, not just one page.
+cp -r "${REPO_ROOT}/frontend/dist" "${STAGE_DIR}/dist"
 cp -r "${REPO_ROOT}/sources" "${STAGE_DIR}/sources"
 echo "==> Installing dependencies"
 pip install --target "${STAGE_DIR}" pypdf --quiet
