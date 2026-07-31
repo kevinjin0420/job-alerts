@@ -1,0 +1,22 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background-color: rgb(212 212 212);
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+html { scrollbar-color: rgb(212 212 212) transparent; scrollbar-width: thin; }
+
+.dark ::-webkit-scrollbar-thumb { background-color: rgb(64 64 64); }
+.dark html { scrollbar-color: rgb(64 64 64) transparent; }
+
+@keyframes skeleton-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+.skeleton { animation: skeleton-pulse 1.5s ease-in-out infinite; }
