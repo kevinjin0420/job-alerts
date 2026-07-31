@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -11,6 +12,8 @@ from sources.base import Listing
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 REQUEST_TIMEOUT_SECONDS = 30
+MAX_ATTEMPTS = 10
+RETRY_BACKOFF_BASE_SECONDS = 1
 
 # Kept out of fit_prompt so users write only criteria - app.py exposes these via GET /api/config for an exact-prompt preview.
 FIT_SYSTEM_PREAMBLE = (
@@ -45,10 +48,10 @@ def _call_openrouter(
     user_content: str,
     properties: dict[str, object],
     required: list[str],
-    max_attempts: int = 2,
+    max_attempts: int = MAX_ATTEMPTS,
     request_timeout_seconds: int = REQUEST_TIMEOUT_SECONDS,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    """POSTs a structured-JSON classification request; retries once by default since reasoning models occasionally return empty content. Returns (parsed content, usage)."""
+    """POSTs a structured-JSON classification request; retries with increasing backoff, since reasoning models occasionally return empty/malformed content. Returns (parsed content, usage)."""
     body = json.dumps(
         {
             "model": model,
@@ -79,7 +82,8 @@ def _call_openrouter(
             # getting notified regardless of fit. max_tokens leaves headroom above
             # the reasoning cap for the actual JSON content.
             "reasoning": {"max_tokens": 150},
-            "max_tokens": 1000,
+            # Some OpenRouter backends don't cleanly cap reasoning at the hint above, truncating the JSON reason mid-word - 4000 gives real headroom.
+            "max_tokens": 4000,
         }
     ).encode("utf-8")
     request = urllib.request.Request(
@@ -90,7 +94,9 @@ def _call_openrouter(
     )
 
     last_error: Exception | None = None
-    for _ in range(max_attempts):
+    for attempt in range(max_attempts):
+        if attempt > 0:
+            time.sleep(RETRY_BACKOFF_BASE_SECONDS * attempt)
         try:
             with urllib.request.urlopen(request, timeout=request_timeout_seconds) as response:
                 payload = json.loads(response.read())
@@ -109,10 +115,7 @@ def _call_openrouter(
             last_error = ClassifierError(f"Unexpected OpenRouter response shape: {payload}")
             continue
 
-    # Wrapped, not re-raised bare: every caller (check_is_job_posting, is_good_fit)
-    # is only ever built to catch ClassifierError and fail open - a bare URLError/
-    # TimeoutError (e.g. a 429 from OpenRouter) would otherwise crash the whole
-    # scan before it reaches any user, instead of just skipping this one listing.
+    # Wrapped, not re-raised bare: every caller catches ClassifierError specifically (check_is_job_posting fails open, is_good_fit fails closed) - a bare URLError/TimeoutError would otherwise crash the whole scan instead of just skipping this one listing.
     if last_error is None:
         raise ClassifierError("classifier call failed with no response")
     raise ClassifierError(f"OpenRouter call failed: {last_error}") from last_error
@@ -182,7 +185,7 @@ def is_good_fit(
     fit_prompt: str,
     listing: Listing,
     resume_text: str | None = None,
-    max_attempts: int = 2,
+    max_attempts: int = MAX_ATTEMPTS,
     request_timeout_seconds: int = REQUEST_TIMEOUT_SECONDS,
     user_id: str | None = None,
 ) -> ClassificationResult:

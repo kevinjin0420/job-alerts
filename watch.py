@@ -7,6 +7,7 @@ import os
 import sys
 import time
 
+from classifier import MAX_ATTEMPTS as CLASSIFIER_MAX_ATTEMPTS
 from classifier import ClassificationResult, ClassifierError, check_is_job_posting, is_good_fit
 from notifiers import NotificationError, notify, notify_message
 from resume import ResumeFetchError, fetch_resume_text_from_url
@@ -38,6 +39,7 @@ from users import (
 
 DEFAULT_JOB_TYPES = ["intern"]
 SOURCE_FAILURE_ALERT_THRESHOLD = 3
+CLASSIFIER_HEALTH_KEY = "classifier:openrouter"
 JOB_TYPE_URL_FIELDS = {"intern": "intern_url", "newgrad": "newgrad_url", "fulltime": "fulltime_url"}
 ZYTE_FETCH_INTERVAL_SECONDS = 4 * 60 * 60
 # I/O-bound OpenRouter calls - a thread pool cuts N sequential calls to N/32; safe to raise since a classifier failure now fails closed (see passes_classifier), not open.
@@ -176,24 +178,35 @@ def passes_classifier(
     listing: Listing,
     resume_text: str | None = None,
     user_id: str | None = None,
+    smtp_user: str = "",
+    smtp_pass: str = "",
 ) -> ClassificationResult | None:
     """fits=True means "notify". Disabled (no key, no prompt, or unedited placeholder
-    prompt) fails open, since there's nothing to check against. An API failure
-    returns None ("couldn't classify this run") rather than failing open -
-    failing open used to notify on every affected listing regardless of fit,
-    which under a sustained failure (e.g. OpenRouter rate-limiting a whole batch
-    under high concurrency) turned into notifying on everything, unfiltered.
-    None leaves the listing out of seen_ids, so it's just reclassified next run."""
+    prompt) fails open, since there's nothing to check against. is_good_fit already
+    retries CLASSIFIER_MAX_ATTEMPTS times with backoff internally - a ClassifierError
+    here means every one of those attempts failed. Returns None ("couldn't classify
+    this run") rather than failing open - failing open used to notify on every
+    affected listing regardless of fit, which under a sustained failure (e.g.
+    OpenRouter rate-limiting a whole batch under high concurrency) turned into
+    notifying on everything, unfiltered. None leaves the listing out of seen_ids, so
+    it's just reclassified next run. Persistent failure also pages admins once (not
+    every run) via the same alerted-until-recovery pattern as source health."""
     if not classifier_enabled(openrouter_api_key, fit_prompt):
         return ClassificationResult(fits=True, reason="classifier disabled")
     try:
-        return is_good_fit(openrouter_api_key, classifier_model, fit_prompt, listing, resume_text, user_id=user_id)
+        result = is_good_fit(openrouter_api_key, classifier_model, fit_prompt, listing, resume_text, user_id=user_id)
     except ClassifierError as error:
         print(
-            f"Classifier failed for {listing.company_name} - {listing.title}, will retry next run: {error}",
+            f"Classifier failed for {listing.company_name} - {listing.title} after {CLASSIFIER_MAX_ATTEMPTS} attempts, will retry next run: {error}",
             file=sys.stderr,
         )
+        consecutive_failures = record_source_failure(CLASSIFIER_HEALTH_KEY)
+        if consecutive_failures >= SOURCE_FAILURE_ALERT_THRESHOLD and not is_source_alerted(CLASSIFIER_HEALTH_KEY):
+            mark_source_alerted(CLASSIFIER_HEALTH_KEY)
+            alert_admins_classifier_failing(str(error), smtp_user, smtp_pass)
         return None
+    record_source_success(CLASSIFIER_HEALTH_KEY)
+    return result
 
 
 def _fetch_one_source(source: Source) -> tuple[Source, list[Listing] | Exception]:
@@ -276,11 +289,7 @@ def resolve_listing_validity(
     return validity
 
 
-def alert_admins(unhealthy_sources: list[str], smtp_user: str, smtp_pass: str) -> None:
-    body = (
-        f"These sources have failed {SOURCE_FAILURE_ALERT_THRESHOLD}+ runs in a row: "
-        f"{', '.join(unhealthy_sources)}"
-    )
+def _notify_all_admins(subject: str, body: str, smtp_user: str, smtp_pass: str) -> None:
     for admin in list_all_users():
         if not admin.get("is_admin"):
             continue
@@ -290,9 +299,26 @@ def alert_admins(unhealthy_sources: list[str], smtp_user: str, smtp_pass: str) -
             continue
         email_recipients = get_email_recipients(load_user_config(admin_id)) or [admin_id]
         try:
-            notify_message(ntfy_topic, smtp_user, smtp_pass, email_recipients, "job-alerts: source failing", body)
+            notify_message(ntfy_topic, smtp_user, smtp_pass, email_recipients, subject, body)
         except NotificationError as error:
-            print(f"Failed to alert admin {admin_id} about source failures: {error}", file=sys.stderr)
+            print(f"Failed to alert admin {admin_id}: {error}", file=sys.stderr)
+
+
+def alert_admins(unhealthy_sources: list[str], smtp_user: str, smtp_pass: str) -> None:
+    body = (
+        f"These sources have failed {SOURCE_FAILURE_ALERT_THRESHOLD}+ runs in a row: "
+        f"{', '.join(unhealthy_sources)}"
+    )
+    _notify_all_admins("job-alerts: source failing", body, smtp_user, smtp_pass)
+
+
+def alert_admins_classifier_failing(error: str, smtp_user: str, smtp_pass: str) -> None:
+    body = (
+        f"The classifier has failed {SOURCE_FAILURE_ALERT_THRESHOLD}+ consecutive calls, "
+        f"retrying each up to {CLASSIFIER_MAX_ATTEMPTS} times: {error}. Affected listings are "
+        "left unseen and retried next run, not notified."
+    )
+    _notify_all_admins("job-alerts: classifier failing", body, smtp_user, smtp_pass)
 
 
 def _resolve_resume_text(user_id: str) -> str | None:
@@ -369,7 +395,15 @@ def process_user(
         with concurrent.futures.ThreadPoolExecutor(max_workers=CLASSIFIER_CONCURRENCY) as executor:
             futures = {
                 executor.submit(
-                    passes_classifier, openrouter_api_key, classifier_model, fit_prompt, listing, resume_text, user_id
+                    passes_classifier,
+                    openrouter_api_key,
+                    classifier_model,
+                    fit_prompt,
+                    listing,
+                    resume_text,
+                    user_id,
+                    smtp_user,
+                    smtp_pass,
                 ): listing
                 for listing in listings_needing_classification
             }

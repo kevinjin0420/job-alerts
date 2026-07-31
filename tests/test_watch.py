@@ -7,6 +7,7 @@ from unittest.mock import patch
 from classifier import ClassificationResult, ClassifierError
 from sources.base import Listing
 from watch import (
+    CLASSIFIER_HEALTH_KEY,
     SOURCE_FAILURE_ALERT_THRESHOLD,
     _job_type_url,
     build_job_type_sources,
@@ -89,7 +90,8 @@ class PassesClassifierFailureModeTests(unittest.TestCase):
 
     def test_returns_none_on_classifier_error_instead_of_notifying(self) -> None:
         with patch("watch.is_good_fit", side_effect=ClassifierError("429 too many requests")):
-            result = passes_classifier("fake-key", "fake-model", "must be remote", _listing("1"))
+            with patch("watch.record_source_failure", return_value=1):
+                result = passes_classifier("fake-key", "fake-model", "must be remote", _listing("1"))
         self.assertIsNone(result)
 
     def test_disabled_classifier_still_fails_open(self) -> None:
@@ -99,8 +101,41 @@ class PassesClassifierFailureModeTests(unittest.TestCase):
     def test_successful_call_passes_through_unchanged(self) -> None:
         expected = ClassificationResult(fits=False, reason="not remote")
         with patch("watch.is_good_fit", return_value=expected):
-            result = passes_classifier("fake-key", "fake-model", "must be remote", _listing("1"))
+            with patch("watch.record_source_success") as mock_success:
+                result = passes_classifier("fake-key", "fake-model", "must be remote", _listing("1"))
         self.assertEqual(result, expected)
+        mock_success.assert_called_once_with(CLASSIFIER_HEALTH_KEY)
+
+
+class ClassifierFailureAlertingTests(unittest.TestCase):
+    """Persistent classifier failure should page admins once, not every run - same alerted-until-recovery pattern as source health."""
+
+    def test_crossing_threshold_alerts_once(self) -> None:
+        with patch("watch.is_good_fit", side_effect=ClassifierError("boom")):
+            with patch("watch.record_source_failure", return_value=SOURCE_FAILURE_ALERT_THRESHOLD):
+                with patch("watch.is_source_alerted", return_value=False):
+                    with patch("watch.mark_source_alerted") as mock_mark:
+                        with patch("watch.alert_admins_classifier_failing") as mock_alert:
+                            passes_classifier("fake-key", "fake-model", "must be remote", _listing("1"))
+        mock_mark.assert_called_once_with(CLASSIFIER_HEALTH_KEY)
+        mock_alert.assert_called_once()
+
+    def test_already_alerted_is_not_reported_again(self) -> None:
+        with patch("watch.is_good_fit", side_effect=ClassifierError("boom")):
+            with patch("watch.record_source_failure", return_value=SOURCE_FAILURE_ALERT_THRESHOLD):
+                with patch("watch.is_source_alerted", return_value=True):
+                    with patch("watch.mark_source_alerted") as mock_mark:
+                        with patch("watch.alert_admins_classifier_failing") as mock_alert:
+                            passes_classifier("fake-key", "fake-model", "must be remote", _listing("1"))
+        mock_mark.assert_not_called()
+        mock_alert.assert_not_called()
+
+    def test_below_threshold_does_not_alert(self) -> None:
+        with patch("watch.is_good_fit", side_effect=ClassifierError("boom")):
+            with patch("watch.record_source_failure", return_value=1):
+                with patch("watch.alert_admins_classifier_failing") as mock_alert:
+                    passes_classifier("fake-key", "fake-model", "must be remote", _listing("1"))
+        mock_alert.assert_not_called()
 
 
 class _FakeSource:
