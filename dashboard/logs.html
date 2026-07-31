@@ -51,6 +51,10 @@ __SIDEBAR__
     <div class="flex items-center justify-between mb-6">
       <h2 class="text-xs font-semibold tracking-widest uppercase text-neutral-500 dark:text-neutral-500">Logs &middot; last 24h</h2>
       <div class="flex items-center gap-4">
+        <div class="flex items-center border border-neutral-300 dark:border-neutral-700 text-xs">
+          <button id="view-flat-btn" class="px-3 py-1.5">Flat</button>
+          <button id="view-runs-btn" class="px-3 py-1.5">By run</button>
+        </div>
         <label class="flex items-center gap-2 text-xs text-neutral-600 dark:text-neutral-400">
           <input type="checkbox" id="failures-only" class="rounded-none border-neutral-300 dark:border-neutral-700">
           Failures only
@@ -73,45 +77,190 @@ function isoTime(value) {
   return new Date(value).toISOString().replace(/\.\d{3}Z$/, "Z");
 }
 
+const VIEW_MODE_STORAGE_KEY = "job-alerts-logs-view-mode";
+let allEvents = [];
+
+function currentViewMode() {
+  return localStorage.getItem(VIEW_MODE_STORAGE_KEY) === "runs" ? "runs" : "flat";
+}
+
+function setViewMode(mode) {
+  localStorage.setItem(VIEW_MODE_STORAGE_KEY, mode);
+  updateViewModeButtons();
+  render();
+}
+
+function updateViewModeButtons() {
+  const mode = currentViewMode();
+  const activeClass = "bg-neutral-900 dark:bg-neutral-100 text-white dark:text-neutral-900";
+  const inactiveClass = "hover:bg-neutral-100 dark:hover:bg-neutral-900";
+  const flatBtn = document.getElementById("view-flat-btn");
+  const runsBtn = document.getElementById("view-runs-btn");
+  flatBtn.className = `px-3 py-1.5 ${mode === "flat" ? activeClass : inactiveClass}`;
+  runsBtn.className = `px-3 py-1.5 ${mode === "runs" ? activeClass : inactiveClass}`;
+}
+
 async function showApp() {
   showAppShell();
   if (!(await requireAdmin())) return;
+  updateViewModeButtons();
   loadLogs();
 }
 
 document.getElementById("refresh-btn").addEventListener("click", loadLogs);
-document.getElementById("failures-only").addEventListener("change", loadLogs);
+document.getElementById("failures-only").addEventListener("change", render);
+document.getElementById("view-flat-btn").addEventListener("click", () => setViewMode("flat"));
+document.getElementById("view-runs-btn").addEventListener("click", () => setViewMode("runs"));
 
 function renderMessage(container, text, extraClass) {
   container.innerHTML = `<div class="text-sm ${extraClass}">${text}</div>`;
 }
 
-async function loadLogs() {
-  const container = document.getElementById("logs");
-  renderMessage(container, "Loading…", "text-neutral-500 dark:text-neutral-500");
-  let data;
-  try {
-    const response = await apiFetch("/api/logs");
-    data = await response.json();
-  } catch (error) {
-    renderMessage(container, "Failed to load logs", "text-red-600 dark:text-red-400");
-    return;
+function lineEl(event) {
+  const line = document.createElement("div");
+  line.className = event.is_failure
+    ? "text-red-600 dark:text-red-400"
+    : "text-neutral-700 dark:text-neutral-300";
+  line.innerHTML = `<span class="text-neutral-400 dark:text-neutral-600 mr-2">${isoTime(event.timestamp)}</span>${event.message.replace(/</g, "&lt;")}`;
+  return line;
+}
+
+// Lambda only tags the platform-generated START/END/REPORT lines with a RequestId (not
+// the plain print() lines between them), so runs are reconstructed by walking events in
+// ascending time order and attributing each line to whichever run is currently open. A
+// genuinely overlapping invocation (rare - happens if a manual scan overlaps the schedule)
+// would misattribute lines to whichever run started last; not solved here.
+function groupIntoRuns(events) {
+  const ascending = [...events].reverse();
+  const runs = [];
+  const openStack = [];
+  let unknownRun = null;
+
+  function currentRun() {
+    if (openStack.length) return openStack[openStack.length - 1];
+    if (!unknownRun) {
+      unknownRun = { id: null, startTime: null, endTime: null, durationMs: null, lines: [], failureCount: 0 };
+      runs.push(unknownRun);
+    }
+    return unknownRun;
   }
+
+  for (const event of ascending) {
+    const startMatch = event.message.match(/^START RequestId: (\S+)/);
+    const endMatch = event.message.match(/^END RequestId: \S+/);
+    const reportMatch = event.message.match(/^REPORT RequestId: \S+\s+Duration: ([\d.]+) ms/);
+
+    if (startMatch) {
+      const run = { id: startMatch[1], startTime: event.timestamp, endTime: null, durationMs: null, lines: [], failureCount: 0 };
+      runs.push(run);
+      openStack.push(run);
+    }
+
+    const run = currentRun();
+    run.lines.push(event);
+    if (event.is_failure) run.failureCount++;
+    if (reportMatch) run.durationMs = parseFloat(reportMatch[1]);
+    if (endMatch) {
+      run.endTime = event.timestamp;
+      openStack.pop();
+    }
+  }
+
+  return runs.reverse();
+}
+
+function runHeaderEl(run) {
+  const header = document.createElement("button");
+  header.className = "w-full flex items-center justify-between gap-3 px-2 py-1.5 text-left bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700";
+
+  const left = document.createElement("span");
+  left.className = "flex items-center gap-2 truncate";
+  const label = run.id ? `RequestId ${run.id}` : "Lines before first START in window";
+  const time = run.startTime ? isoTime(run.startTime) : "";
+  left.innerHTML = `<span class="text-neutral-400 dark:text-neutral-600">${time}</span><span class="truncate">${label}</span>`;
+  header.appendChild(left);
+
+  const right = document.createElement("span");
+  right.className = "flex items-center gap-2 shrink-0 text-neutral-500 dark:text-neutral-500";
+  if (run.durationMs !== null) {
+    const duration = document.createElement("span");
+    duration.textContent = `${run.durationMs.toFixed(0)} ms`;
+    right.appendChild(duration);
+  }
+  if (run.failureCount > 0) {
+    const badge = document.createElement("span");
+    badge.className = "text-red-600 dark:text-red-400";
+    badge.textContent = `${run.failureCount} failure(s)`;
+    right.appendChild(badge);
+  }
+  const count = document.createElement("span");
+  count.textContent = `${run.lines.length} line(s)`;
+  right.appendChild(count);
+  header.appendChild(right);
+
+  return header;
+}
+
+function renderRuns(container, events) {
   const failuresOnly = document.getElementById("failures-only").checked;
-  const events = data.events.filter((event) => !failuresOnly || event.is_failure);
-  if (events.length === 0) {
+  const runs = groupIntoRuns(events);
+  container.innerHTML = "";
+  let rendered = 0;
+  for (const run of runs) {
+    const displayLines = failuresOnly ? run.lines.filter((event) => event.is_failure) : run.lines;
+    if (displayLines.length === 0) continue;
+    rendered++;
+
+    const wrapper = document.createElement("div");
+    wrapper.className = "border border-neutral-200 dark:border-neutral-800 mb-2 last:mb-0";
+    const header = runHeaderEl(run);
+    const body = document.createElement("div");
+    body.className = "p-2 hidden";
+    for (const event of displayLines) body.appendChild(lineEl(event));
+    if (run.failureCount > 0) body.classList.remove("hidden");
+    header.addEventListener("click", () => body.classList.toggle("hidden"));
+
+    wrapper.appendChild(header);
+    wrapper.appendChild(body);
+    container.appendChild(wrapper);
+  }
+  if (rendered === 0) {
+    renderMessage(container, "No log events in this window", "text-neutral-500 dark:text-neutral-500");
+  }
+}
+
+function renderFlat(container, events) {
+  const failuresOnly = document.getElementById("failures-only").checked;
+  const filtered = events.filter((event) => !failuresOnly || event.is_failure);
+  if (filtered.length === 0) {
     renderMessage(container, "No log events in this window", "text-neutral-500 dark:text-neutral-500");
     return;
   }
   container.innerHTML = "";
-  for (const event of events) {
-    const line = document.createElement("div");
-    line.className = event.is_failure
-      ? "text-red-600 dark:text-red-400"
-      : "text-neutral-700 dark:text-neutral-300";
-    line.innerHTML = `<span class="text-neutral-400 dark:text-neutral-600 mr-2">${isoTime(event.timestamp)}</span>${event.message.replace(/</g, "&lt;")}`;
-    container.appendChild(line);
+  for (const event of filtered) container.appendChild(lineEl(event));
+}
+
+function render() {
+  const container = document.getElementById("logs");
+  if (currentViewMode() === "runs") {
+    renderRuns(container, allEvents);
+  } else {
+    renderFlat(container, allEvents);
   }
+}
+
+async function loadLogs() {
+  const container = document.getElementById("logs");
+  renderMessage(container, "Loading…", "text-neutral-500 dark:text-neutral-500");
+  try {
+    const response = await apiFetch("/api/logs");
+    const data = await response.json();
+    allEvents = data.events;
+  } catch (error) {
+    renderMessage(container, "Failed to load logs", "text-red-600 dark:text-red-400");
+    return;
+  }
+  render();
 }
 
 if (token()) {

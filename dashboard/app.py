@@ -616,14 +616,19 @@ def _metric_period_seconds(window_seconds: int) -> int:
     return 86400
 
 
-def _insights_bin_expression(window_seconds: int) -> str:
+_BIN_SECONDS_TO_EXPRESSION = {60: "1m", 300: "5m", 900: "15m", 1800: "30m", 3600: "1h", 21600: "6h", 86400: "1d"}
+
+
+def _insights_bin_seconds(window_seconds: int) -> int:
     """Same idea as _metric_period_seconds, but for Insights' bin() syntax."""
-    for seconds, expression in (
-        (60, "1m"), (300, "5m"), (900, "15m"), (1800, "30m"), (3600, "1h"), (21600, "6h"), (86400, "1d"),
-    ):
+    for seconds in _BIN_SECONDS_TO_EXPRESSION:
         if window_seconds / seconds <= 200:
-            return expression
-    return "1d"
+            return seconds
+    return 86400
+
+
+def _insights_bin_expression(window_seconds: int) -> str:
+    return _BIN_SECONDS_TO_EXPRESSION[_insights_bin_seconds(window_seconds)]
 
 
 def _run_insights_query(query_string: str, minutes: int) -> list[list[dict[str, str]]]:
@@ -693,8 +698,18 @@ def _token_usage_series(minutes: int) -> list[dict[str, Any]]:
     to the selected window (see _insights_bin_expression) - both event types
     already log input_tokens/output_tokens per OpenRouter call (see classifier.py),
     this just aggregates them server-side via Insights instead of pulling every
-    individual call's tokens back to sum in Python."""
-    bin_expression = _insights_bin_expression(minutes * 60)
+    individual call's tokens back to sum in Python.
+
+    Insights' `stats ... by bin()` only returns buckets that actually matched
+    a row - a bucket with zero classifier activity (common; most 5-minute runs
+    find nothing new to classify) is simply absent, not present with a zero.
+    Left as-is, Chart.js draws a line connecting only the sparse real points,
+    implying a trend across a gap that was actually flat zero the whole time.
+    Every bucket in the window is zero-filled here so the series is complete.
+    """
+    window_seconds = minutes * 60
+    bin_seconds = _insights_bin_seconds(window_seconds)
+    bin_expression = _BIN_SECONDS_TO_EXPRESSION[bin_seconds]
     query_string = (
         "fields @timestamp, @message"
         " | filter @message like /classifier_call/ or @message like /validity_check/"
@@ -703,21 +718,27 @@ def _token_usage_series(minutes: int) -> list[dict[str, Any]]:
         f" | stats sum(raw_input) as input_tokens, sum(raw_output) as output_tokens by bin({bin_expression}) as bucket"
         " | sort bucket asc"
     )
-    parsed: list[dict[str, Any]] = []
+    by_timestamp: dict[str, dict[str, Any]] = {}
     for row in _run_insights_query(query_string, minutes):
         fields = {field["field"]: field["value"] for field in row}
         timestamp = _parse_insights_timestamp(fields.get("bucket", ""))
         if timestamp is None:
             continue
-        parsed.append(
-            {
-                "timestamp": timestamp,
-                "input_tokens": int(float(fields.get("input_tokens", 0))),
-                "output_tokens": int(float(fields.get("output_tokens", 0))),
-            }
-        )
-    parsed.sort(key=lambda item: item["timestamp"])
-    return parsed
+        by_timestamp[timestamp] = {
+            "timestamp": timestamp,
+            "input_tokens": int(float(fields.get("input_tokens", 0))),
+            "output_tokens": int(float(fields.get("output_tokens", 0))),
+        }
+
+    end_time = time.time()
+    start_time = end_time - window_seconds
+    bucket_epoch = int(start_time // bin_seconds) * bin_seconds
+    filled: list[dict[str, Any]] = []
+    while bucket_epoch <= end_time:
+        timestamp = datetime.fromtimestamp(bucket_epoch, tz=timezone.utc).isoformat()
+        filled.append(by_timestamp.get(timestamp, {"timestamp": timestamp, "input_tokens": 0, "output_tokens": 0}))
+        bucket_epoch += bin_seconds
+    return filled
 
 
 def _token_usage_by_user(minutes: int) -> list[dict[str, Any]]:

@@ -317,7 +317,20 @@ function renderChartCard(id, title, series, data, options = {}) {
   header.appendChild(heading);
   figureEl.appendChild(header);
 
-  if (!data.length) {
+  if (!data.length && options.emptyMeansZero) {
+    // No matching log lines here genuinely means zero activity happened (e.g.
+    // no classifier calls this window), not that data is missing - render a
+    // flat zero line across the window instead of an ambiguous "no data".
+    const range = currentRange();
+    const now = Date.now();
+    const start = now - range.minutes * 60 * 1000;
+    const zeroPoint = (ts) => {
+      const point = { timestamp: new Date(ts).toISOString() };
+      for (const s of series) point[s.key] = 0;
+      return point;
+    };
+    data = [zeroPoint(start), zeroPoint(now)];
+  } else if (!data.length) {
     const empty = document.createElement("div");
     empty.className = "text-sm text-neutral-500 dark:text-neutral-500 py-6";
     empty.textContent = "No data in the selected window";
@@ -432,7 +445,7 @@ function renderCharts(metrics) {
       { key: "output_tokens", label: "Output tokens", color: colors.series2 },
     ],
     metrics.token_usage_series || [],
-    { yFormat: (value) => Math.round(value).toLocaleString(), yAxisLabel: "Tokens" },
+    { yFormat: (value) => Math.round(value).toLocaleString(), yAxisLabel: "Tokens", emptyMeansZero: true },
   );
 }
 

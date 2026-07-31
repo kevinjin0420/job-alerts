@@ -89,35 +89,54 @@ def _bucket_row(bucket: str, input_tokens: str, output_tokens: str) -> list[dict
 
 
 class TokenUsageSeriesTests(unittest.TestCase):
-    def test_parses_bucketed_sums_and_converts_timestamp(self) -> None:
+    """minutes here means minutes (60s bins per _insights_bin_seconds, since
+    e.g. 10*60=600s / 60s = 10 <= 200) - not the hours used elsewhere in this
+    file. time.time() is mocked so zero-filled bucket boundaries are
+    deterministic instead of depending on when the test happens to run."""
+
+    def test_parses_a_real_bucket_and_zero_fills_the_rest(self) -> None:
+        fake_now = datetime(2026, 7, 30, 21, 5, 0, tzinfo=timezone.utc).timestamp()
         results = [_bucket_row("2026-07-30 21:00:00.000", "61026", "64701")]
         with patch.object(app.logs_client, "start_query", return_value={"queryId": "q1"}):
             with patch.object(app.logs_client, "get_query_results", return_value={"status": "Complete", "results": results}):
-                series = app._token_usage_series(24)
+                with patch("app.time.time", return_value=fake_now):
+                    series = app._token_usage_series(10)
 
-        self.assertEqual(len(series), 1)
-        self.assertEqual(series[0]["input_tokens"], 61026)
-        self.assertEqual(series[0]["output_tokens"], 64701)
-        self.assertEqual(series[0]["timestamp"], datetime(2026, 7, 30, 21, 0, 0, tzinfo=timezone.utc).isoformat())
+        by_timestamp = {item["timestamp"]: item for item in series}
+        real_bucket = datetime(2026, 7, 30, 21, 0, 0, tzinfo=timezone.utc).isoformat()
+        self.assertEqual(by_timestamp[real_bucket]["input_tokens"], 61026)
+        self.assertEqual(by_timestamp[real_bucket]["output_tokens"], 64701)
+        other_buckets = [item for ts, item in by_timestamp.items() if ts != real_bucket]
+        self.assertTrue(other_buckets)
+        self.assertTrue(all(item["input_tokens"] == 0 and item["output_tokens"] == 0 for item in other_buckets))
 
     def test_sorts_buckets_ascending(self) -> None:
+        fake_now = datetime(2026, 7, 30, 22, 5, 0, tzinfo=timezone.utc).timestamp()
         results = [
             _bucket_row("2026-07-30 22:00:00.000", "10", "20"),
             _bucket_row("2026-07-30 21:00:00.000", "5", "8"),
         ]
         with patch.object(app.logs_client, "start_query", return_value={"queryId": "q1"}):
             with patch.object(app.logs_client, "get_query_results", return_value={"status": "Complete", "results": results}):
-                series = app._token_usage_series(24)
+                with patch("app.time.time", return_value=fake_now):
+                    series = app._token_usage_series(70)
 
-        self.assertEqual([item["input_tokens"] for item in series], [5, 10])
+        timestamps = [item["timestamp"] for item in series]
+        self.assertEqual(timestamps, sorted(timestamps))
+        by_timestamp = {item["timestamp"]: item for item in series}
+        self.assertEqual(by_timestamp[datetime(2026, 7, 30, 21, 0, 0, tzinfo=timezone.utc).isoformat()]["input_tokens"], 5)
+        self.assertEqual(by_timestamp[datetime(2026, 7, 30, 22, 0, 0, tzinfo=timezone.utc).isoformat()]["input_tokens"], 10)
 
-    def test_returns_empty_when_query_never_completes(self) -> None:
+    def test_zero_fills_the_whole_window_when_query_never_completes(self) -> None:
+        fake_now = datetime(2026, 7, 30, 21, 5, 0, tzinfo=timezone.utc).timestamp()
         with patch.object(app.logs_client, "start_query", return_value={"queryId": "q1"}):
             with patch.object(app.logs_client, "get_query_results", return_value={"status": "Running", "results": []}):
                 with patch("app.time.sleep"):
-                    series = app._token_usage_series(24)
+                    with patch("app.time.time", return_value=fake_now):
+                        series = app._token_usage_series(5)
 
-        self.assertEqual(series, [])
+        self.assertTrue(series)
+        self.assertTrue(all(item["input_tokens"] == 0 and item["output_tokens"] == 0 for item in series))
 
 
 class RecentLogEventsTests(unittest.TestCase):
