@@ -134,7 +134,7 @@ export function LogsPage() {
         <RefreshButton onClick={() => void logs.refetch()} />
       </PageHeader>
 
-      <div className="border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3 min-h-[200px] max-h-[calc(100vh-160px)] overflow-y-auto font-mono text-xs leading-5">
+      <div className="flex-1 min-h-0 border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3 overflow-y-auto font-mono text-xs leading-5">
         {renderBody()}
       </div>
     </>

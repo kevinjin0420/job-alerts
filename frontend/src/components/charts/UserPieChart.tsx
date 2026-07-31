@@ -2,6 +2,7 @@ import { Pie } from "react-chartjs-2";
 
 import "./registerCharts";
 import { chartPalette } from "../../lib/chartPalette";
+import { useMediaQuery } from "../../lib/useMediaQuery";
 import { useTheme } from "../../theme/ThemeContext";
 import { ChartCard } from "./ChartCard";
 
@@ -58,6 +59,9 @@ export function UserPieChart({
 }) {
   const { isDark } = useTheme();
   const palette = chartPalette(isDark);
+  // Legend labels are user ids (emails); beside the pie they get truncated to a
+  // few characters on a phone, so drop them below it where there is full width.
+  const isNarrow = useMediaQuery("(max-width: 767px)");
 
   const sliced = foldIntoTopSlices(rows.filter((row) => row.value > 0));
   const labelFor = (userId: string) => (userId === OTHER_SLICE_ID ? "Other" : userLabel(userId));
@@ -70,7 +74,7 @@ export function UserPieChart({
       title={title}
       isEmpty={sliced.length === 0}
       chart={
-        <div className="h-64">
+        <div className={isNarrow ? "h-80" : "h-64"}>
           <Pie
             data={{
               labels: sliced.map((row) => labelFor(row.user_id)),
@@ -87,7 +91,10 @@ export function UserPieChart({
               responsive: true,
               maintainAspectRatio: false,
               plugins: {
-                legend: { position: "right", labels: { color: palette.axis, usePointStyle: true, boxWidth: 8 } },
+                legend: {
+                  position: isNarrow ? "bottom" : "right",
+                  labels: { color: palette.axis, usePointStyle: true, boxWidth: 8 },
+                },
                 tooltip: {
                   usePointStyle: true,
                   callbacks: { label: (item) => `${formatValue(item.parsed)}  ${item.label}` },

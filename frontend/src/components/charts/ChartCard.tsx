@@ -1,6 +1,9 @@
 import { useState, type ReactNode } from "react";
 
-const FIGURE_CLASS = "border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 px-4 py-4";
+// min-w-0: a grid item defaults to min-width:auto, so without it the canvas's
+// intrinsic width pushes the card past the viewport instead of shrinking to fit.
+const FIGURE_CLASS =
+  "min-w-0 border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 px-4 py-4";
 
 /** Chart.js has no accessible/no-JS equivalent, so every card carries a table twin. */
 export function ChartCard({

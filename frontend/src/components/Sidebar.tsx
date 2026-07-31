@@ -3,7 +3,7 @@ import { NavLink } from "react-router-dom";
 import { useCurrentUser } from "../api/hooks";
 import { ThemeToggle } from "./ThemeToggle";
 
-const BASE_LINK_CLASS = "px-3 py-2 rounded-none";
+const BASE_LINK_CLASS = "px-3 py-2.5 rounded-none";
 const INACTIVE_CLASS = "text-neutral-600 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-900";
 const ACTIVE_CLASS = "font-medium bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900";
 
@@ -32,11 +32,15 @@ function SidebarLink({ to, label }: { to: string; label: string }) {
   );
 }
 
-export function Sidebar() {
+/** onClose is supplied only in the mobile drawer - the docked desktop sidebar has
+ * nothing to close, so it renders no dismiss control. */
+export function Sidebar({ className = "", onClose }: { className?: string; onClose?: () => void }) {
   const { data: currentUser } = useCurrentUser();
 
   return (
-    <aside className="w-52 shrink-0 border-r border-neutral-200 dark:border-neutral-800 p-3">
+    <aside
+      className={`w-52 shrink-0 border-r border-neutral-200 dark:border-neutral-800 p-3 bg-neutral-50 dark:bg-neutral-950 ${className}`}
+    >
       <div className="flex items-center justify-between mb-8">
         <div className="text-xs font-semibold tracking-widest uppercase">job-alerts</div>
         <div className="flex items-center gap-2">
@@ -52,6 +56,18 @@ export function Sidebar() {
             </svg>
           </a>
           <ThemeToggle />
+          {onClose && (
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close navigation"
+              className="-mr-1 p-1 text-neutral-500 dark:text-neutral-500 hover:opacity-50"
+            >
+              <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
+              </svg>
+            </button>
+          )}
         </div>
       </div>
       <nav className="flex flex-col gap-1 text-sm">

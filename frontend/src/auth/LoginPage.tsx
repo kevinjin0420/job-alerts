@@ -42,7 +42,7 @@ export function LoginPage() {
     "mt-3 w-full rounded-none border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-neutral-500";
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-6">
+    <div className="min-h-dvh flex items-center justify-center p-6">
       <form
         onSubmit={submit}
         className="w-full max-w-sm rounded-none border border-neutral-300 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-6"

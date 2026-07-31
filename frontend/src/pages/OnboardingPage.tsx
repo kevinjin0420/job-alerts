@@ -164,7 +164,7 @@ export function OnboardingPage() {
   const isLoading = config.isPending || options.isPending || currentUser.isPending;
 
   return (
-    <div className="min-h-screen flex justify-center p-6">
+    <div className="min-h-dvh flex justify-center p-6">
       <div className="w-full max-w-2xl py-10 space-y-6">
         <div>
           <h1 className="text-lg font-semibold">Welcome to job-alerts</h1>

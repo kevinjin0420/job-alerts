@@ -24,7 +24,7 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, State> {
       return this.props.children;
     }
     return (
-      <div className="min-h-screen flex items-center justify-center p-6">
+      <div className="min-h-dvh flex items-center justify-center p-6">
         <div className="w-full max-w-md rounded-none border border-red-200 dark:border-red-900 bg-white dark:bg-neutral-900 p-6">
           <h1 className="text-sm font-semibold uppercase tracking-wide text-red-600 dark:text-red-400">
             Something broke

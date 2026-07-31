@@ -178,7 +178,7 @@ export function ConfigPage() {
       </PageHeader>
 
       <div className="grid lg:grid-cols-3 gap-6 items-start">
-        <div className="lg:col-span-2 flex flex-col gap-6 h-[calc(100vh-160px)]">
+        <div className="lg:col-span-2 flex flex-col gap-6 lg:h-[calc(100dvh-160px)]">
           <div className={CARD_CLASS}>
             <label className={LABEL_CLASS}>Prompt</label>
             <div className="rounded-none border border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-950 p-3 font-mono text-sm leading-6">
@@ -267,7 +267,7 @@ export function ConfigPage() {
           </div>
         </div>
 
-        <div className="lg:col-span-1 flex flex-col gap-6 h-[calc(100vh-160px)]">
+        <div className="lg:col-span-1 flex flex-col gap-6 lg:h-[calc(100dvh-160px)]">
           <div className={CARD_CLASS}>
             <label className={LABEL_CLASS}>Job types</label>
             <div className="rounded-none border border-neutral-200 dark:border-neutral-700 divide-y divide-neutral-200 dark:divide-neutral-800">

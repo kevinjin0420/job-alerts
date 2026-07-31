@@ -21,7 +21,7 @@ import { PageHeader } from "../components/AppLayout";
 const CARD_CLASS = "border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3";
 const LABEL_CLASS = "block text-xs font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-500 mb-2";
 const INPUT_CLASS =
-  "flex-1 rounded-none border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-neutral-500";
+  "flex-1 min-w-[12rem] rounded-none border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-neutral-500";
 const PRIMARY_BUTTON_CLASS =
   "rounded-none bg-neutral-900 hover:opacity-50 disabled:opacity-40 dark:bg-neutral-100 text-white dark:text-neutral-900 text-sm font-medium px-3 py-1.5";
 const SECONDARY_BUTTON_CLASS =
@@ -180,7 +180,7 @@ function ResumeCard() {
         </div>
       ) : (
         <div>
-          <div className="flex gap-3 mb-2">
+          <div className="flex flex-wrap gap-3 mb-2">
             <input
               type="url"
               placeholder="https://example.com/resume.pdf"
@@ -351,7 +351,7 @@ export function ProfilePage() {
         <div className="space-y-6">
           <div className={CARD_CLASS}>
             <label className={LABEL_CLASS}>Email recipient</label>
-            <div className="flex gap-3">
+            <div className="flex flex-wrap gap-3">
               <input
                 type="text"
                 placeholder="you@example.com"
@@ -383,7 +383,7 @@ export function ProfilePage() {
               </a>{" "}
               for setup instructions.
             </p>
-            <div className="flex gap-3">
+            <div className="flex flex-wrap gap-3">
               <input
                 type="text"
                 placeholder="job-alerts-xxxxxxxxxxxx"
@@ -447,7 +447,7 @@ export function ProfilePage() {
             Danger zone
           </label>
 
-          <div className="flex items-center justify-between gap-6 py-2 border-b border-neutral-100 dark:border-neutral-900">
+          <div className="flex flex-wrap items-center justify-between gap-4 py-2 border-b border-neutral-100 dark:border-neutral-900">
             <div>
               <p className="text-sm font-medium">Pause notifications</p>
               <p className="text-sm text-neutral-500 dark:text-neutral-500">
@@ -464,7 +464,7 @@ export function ProfilePage() {
             </button>
           </div>
 
-          <div className="flex items-center justify-between gap-6 py-2">
+          <div className="flex flex-wrap items-center justify-between gap-4 py-2">
             <div>
               <p className="text-sm font-medium">Delete account</p>
               <p className="text-sm text-neutral-500 dark:text-neutral-500">

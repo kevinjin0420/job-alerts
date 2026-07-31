@@ -110,11 +110,11 @@ export function SourcesPage() {
     }
 
     return (
-      <table className="w-full table-fixed border-collapse text-sm">
+      <table className="w-full min-w-[48rem] table-fixed border-collapse text-sm">
         <thead>
           <tr className="sticky top-0 bg-white dark:bg-neutral-900 border-b border-neutral-200 dark:border-neutral-800 text-left text-xs uppercase tracking-wide text-neutral-500 dark:text-neutral-500">
-            <th className="px-3 py-2 font-medium w-1/12">Name</th>
-            <th className="px-3 py-2 font-medium w-3/12">Source</th>
+            <th className="px-3 py-2 font-medium w-2/12">Name</th>
+            <th className="px-3 py-2 font-medium w-2/12">Source</th>
             <th className="px-3 py-2 font-medium w-2/12">Job types</th>
             <th className="px-3 py-2 font-medium w-2/12">Last success</th>
             <th className="px-3 py-2 font-medium w-2/12">Last failure</th>
@@ -260,7 +260,7 @@ export function SourcesPage() {
         <p className="mt-2 text-sm text-neutral-500 dark:text-neutral-500">{addStatus}</p>
       </div>
 
-      <div className="flex-1 min-h-0 border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 overflow-y-auto overflow-x-hidden">
+      <div className="flex-1 min-h-0 border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 overflow-y-auto overflow-x-auto">
         {renderTable()}
       </div>
 

@@ -128,13 +128,13 @@ export function ActivityPage() {
       <h3 className="text-xs font-semibold tracking-widest uppercase text-neutral-500 dark:text-neutral-500 mb-3">
         Notifications sent
       </h3>
-      <div className="flex items-center gap-3 mb-3">
+      <div className="flex flex-wrap items-center gap-3 mb-3">
         <input
           type="text"
           placeholder="Search company or title…"
           value={search}
           onChange={(event) => setSearch(event.target.value)}
-          className="flex-1 rounded-none border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-neutral-500"
+          className="flex-1 min-w-[12rem] rounded-none border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-neutral-500"
         />
         <select
           value={userFilter}
@@ -150,8 +150,8 @@ export function ActivityPage() {
         </select>
       </div>
 
-      <div className="flex-1 min-h-0 border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 overflow-y-auto">
-        <table className="w-full table-fixed border-collapse text-sm">
+      <div className="flex-1 min-h-0 border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 overflow-y-auto overflow-x-auto">
+        <table className="w-full min-w-[48rem] table-fixed border-collapse text-sm">
           <thead>
             <tr className="sticky top-0 bg-white dark:bg-neutral-900 border-b border-neutral-200 dark:border-neutral-800 text-left text-xs uppercase tracking-wide text-neutral-500 dark:text-neutral-500">
               <th className="px-3 py-2 font-medium w-3/12">User</th>

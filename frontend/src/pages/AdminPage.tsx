@@ -15,7 +15,7 @@ import { TableSkeleton } from "../components/Skeleton";
 const CARD_CLASS = "max-w-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3";
 const LABEL_CLASS = "block text-xs font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-500 mb-2";
 const INPUT_CLASS =
-  "flex-1 rounded-none border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-neutral-500";
+  "flex-1 min-w-[12rem] rounded-none border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-neutral-500";
 const PRIMARY_BUTTON_CLASS =
   "rounded-none bg-neutral-900 hover:opacity-50 disabled:opacity-40 dark:bg-neutral-100 text-white dark:text-neutral-900 text-sm font-medium px-3 py-1.5";
 const STATUS_CLASS = "mt-2 text-sm text-neutral-500 dark:text-neutral-500";
@@ -35,7 +35,7 @@ function UsersTable() {
   }
 
   return (
-    <table className="w-full table-fixed border-collapse text-sm">
+    <table className="w-full min-w-[48rem] table-fixed border-collapse text-sm">
       <thead>
         <tr className="sticky top-0 bg-white dark:bg-neutral-900 border-b border-neutral-200 dark:border-neutral-800 text-left text-xs uppercase tracking-wide text-neutral-500 dark:text-neutral-500">
           <th className="px-3 py-2 font-medium w-4/12">Email</th>
@@ -135,7 +135,7 @@ export function AdminPage() {
 
       <div className={`${CARD_CLASS} mb-6`}>
         <label className={LABEL_CLASS}>Invite a user</label>
-        <div className="flex gap-3">
+        <div className="flex flex-wrap gap-3">
           <input
             type="email"
             placeholder="friend@example.com"
@@ -150,7 +150,7 @@ export function AdminPage() {
         <p className={STATUS_CLASS}>{inviteStatus}</p>
       </div>
 
-      <div className="border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 mb-10 max-h-[calc(100vh-160px)] overflow-y-auto overflow-x-hidden">
+      <div className="border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 mb-10 max-h-[calc(100dvh-160px)] overflow-y-auto overflow-x-auto">
         <UsersTable />
       </div>
 
@@ -160,7 +160,7 @@ export function AdminPage() {
 
       <div className={CARD_CLASS}>
         <label className={LABEL_CLASS}>Classifier model</label>
-        <div className="flex gap-3">
+        <div className="flex flex-wrap gap-3">
           <input
             type="text"
             placeholder="qwen/qwen3.6-flash"
