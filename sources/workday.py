@@ -29,6 +29,7 @@ class WorkdaySource:
         self.name = f"workday:{company_name}:{job_type}"
         self._company_name = company_name
         self._base_url = f"https://{tenant}.{host}.myworkdayjobs.com"
+        self._site = site
         self._api_url = f"{self._base_url}/wday/cxs/{tenant}/{site}/jobs"
         self._job_type = job_type
 
@@ -94,7 +95,7 @@ class WorkdaySource:
                         company_name=self._company_name,
                         title=str(job.get("title", "")),
                         locations=[location_text] if location_text else [],
-                        url=f"{self._base_url}{external_path}",
+                        url=f"{self._base_url}/{self._site}{external_path}",
                     )
                 )
             if len(postings) < PAGE_SIZE or len(matches) >= total:

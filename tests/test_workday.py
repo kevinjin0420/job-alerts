@@ -71,7 +71,10 @@ class WorkdaySourceFetchTests(unittest.TestCase):
         self.assertEqual(len(listings), 2)
         self.assertEqual(listings[0].title, "Software Engineering Intern")
         self.assertEqual(listings[0].id, "JR001")
-        self.assertEqual(listings[0].url, "https://example.wd5.myworkdayjobs.com/job/US-CA-Santa-Clara/Software-Engineering-Intern_JR001")
+        self.assertEqual(
+            listings[0].url,
+            "https://example.wd5.myworkdayjobs.com/ExampleCareerSite/job/US-CA-Santa-Clara/Software-Engineering-Intern_JR001",
+        )
 
     def test_newgrad_matches_new_college_graduate_descriptor(self) -> None:
         page_response = {"total": 0, "jobPostings": []}
