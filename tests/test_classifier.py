@@ -51,6 +51,50 @@ class ReasoningTokenCapTests(unittest.TestCase):
         self.assertGreater(sent_body["max_tokens"], 150)
 
 
+class FitScoreClampingTests(unittest.TestCase):
+    """A model once returned a stray year (2022) as fit_score - now clamped by schema constraint and a Python-side backstop."""
+
+    def test_out_of_range_score_is_clamped_to_100(self) -> None:
+        response = _mock_response(
+            {
+                "choices": [{"message": {"content": json.dumps({"fits": True, "reason": "ok", "fit_score": 2022})}}],
+                "usage": {},
+            }
+        )
+        with patch("classifier.urllib.request.urlopen", return_value=response) as mock_urlopen:
+            result = is_good_fit("fake-key", "fake-model", "must be remote", _listing(), resume_text="resume text")
+
+        self.assertEqual(result.fit_score, 100)
+        sent_body = json.loads(mock_urlopen.call_args.args[0].data)
+        fit_score_schema = sent_body["response_format"]["json_schema"]["schema"]["properties"]["fit_score"]
+        self.assertEqual(fit_score_schema["minimum"], 0)
+        self.assertEqual(fit_score_schema["maximum"], 100)
+
+    def test_negative_score_is_clamped_to_zero(self) -> None:
+        response = _mock_response(
+            {
+                "choices": [{"message": {"content": json.dumps({"fits": False, "reason": "ok", "fit_score": -5})}}],
+                "usage": {},
+            }
+        )
+        with patch("classifier.urllib.request.urlopen", return_value=response):
+            result = is_good_fit("fake-key", "fake-model", "must be remote", _listing(), resume_text="resume text")
+
+        self.assertEqual(result.fit_score, 0)
+
+    def test_in_range_score_passes_through_unchanged(self) -> None:
+        response = _mock_response(
+            {
+                "choices": [{"message": {"content": json.dumps({"fits": True, "reason": "ok", "fit_score": 72})}}],
+                "usage": {},
+            }
+        )
+        with patch("classifier.urllib.request.urlopen", return_value=response):
+            result = is_good_fit("fake-key", "fake-model", "must be remote", _listing(), resume_text="resume text")
+
+        self.assertEqual(result.fit_score, 72)
+
+
 class CallOpenrouterErrorWrappingTests(unittest.TestCase):
     """A raw URLError/TimeoutError must never escape _call_openrouter - every
     caller only catches ClassifierError to fail open (see resolve_listing_validity/

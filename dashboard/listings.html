@@ -67,8 +67,10 @@ __SIDEBAR__
 let allListings = [];
 const columnFilters = { company: "", title: "", status: "", fit_score: "" };
 
-function isoTime(value) {
-  return new Date(value * 1000).toISOString().replace(/\.\d{3}Z$/, "Z");
+function formatLocalDate(value) {
+  const date = new Date(value * 1000);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}/${pad(date.getMonth() + 1)}/${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 }
 
 async function showApp() {
@@ -126,13 +128,13 @@ function buildRow(item) {
     <td class="px-3 py-2 align-middle break-words">
       <div class="min-h-[2.5rem] flex items-center"><span class="line-clamp-2">${titleCell}</span></div>
     </td>
-    <td class="px-3 py-2 align-middle break-words font-mono text-xs text-neutral-500 dark:text-neutral-500">${item.source || "-"}</td>
+    <td class="px-3 py-2 align-middle break-words font-mono text-xs">${item.source || "-"}</td>
     <td class="px-3 py-2 align-middle ${STATUS_STYLES[item.status] || ""}">${item.status || "legacy"}</td>
-    <td class="px-3 py-2 align-middle break-words text-neutral-500 dark:text-neutral-500">
+    <td class="px-3 py-2 align-middle break-words">
       <div class="min-h-[2.5rem] flex items-center"><span class="line-clamp-2">${item.reason || "-"}</span></div>
     </td>
-    <td class="px-3 py-2 align-middle font-mono text-xs text-neutral-500 dark:text-neutral-500">${item.fit_score ?? "-"}</td>
-    <td class="px-3 py-2 align-middle font-mono text-xs text-neutral-500 dark:text-neutral-500">${item.seen_at ? isoTime(item.seen_at) : "-"}</td>
+    <td class="px-3 py-2 align-middle font-mono text-xs">${item.fit_score ?? "-"}</td>
+    <td class="px-3 py-2 align-middle font-mono text-xs">${item.seen_at ? formatLocalDate(item.seen_at) : "-"}</td>
     <td class="px-3 py-2 align-middle text-right"></td>
   `;
   if (item.status === "dismissed") {

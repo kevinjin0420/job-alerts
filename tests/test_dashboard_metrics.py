@@ -146,6 +146,33 @@ class RecentLogEventsTests(unittest.TestCase):
         self.assertEqual(events[0]["message"], "Traceback (most recent call last):")
         self.assertTrue(events[0]["is_failure"])
 
+    def test_classifier_dismissed_reason_containing_fail_is_not_flagged(self) -> None:
+        """The classifier's own reasoning often contains "fails"/"Failure" as ordinary words, e.g. in a job title - not an actual failure."""
+        results = [
+            _insights_row(
+                "2026-07-30 21:14:00.000",
+                "User a@b.com: classifier dismissed: Pinterest - ML Intern (Fails multiple criteria: requires PhD)",
+            ),
+            _insights_row(
+                "2026-07-30 21:15:00.000",
+                "User a@b.com: validator rejected: Nvidia - Senior Opto-Mechanical Failure Analysis Engineer (junk)",
+            ),
+        ]
+        with patch.object(app.logs_client, "start_query", return_value={"queryId": "q1"}):
+            with patch.object(app.logs_client, "get_query_results", return_value={"status": "Complete", "results": results}):
+                events = app._recent_log_events()
+
+        self.assertFalse(events[0]["is_failure"])
+        self.assertFalse(events[1]["is_failure"])
+
+    def test_real_source_failure_still_flagged(self) -> None:
+        results = [_insights_row("2026-07-30 21:14:00.000", "Source 'direct:Example:intern' failed: HTTP 429")]
+        with patch.object(app.logs_client, "start_query", return_value={"queryId": "q1"}):
+            with patch.object(app.logs_client, "get_query_results", return_value={"status": "Complete", "results": results}):
+                events = app._recent_log_events()
+
+        self.assertTrue(events[0]["is_failure"])
+
     def test_requests_the_newest_n_directly_via_query_string(self) -> None:
         with patch.object(app.logs_client, "start_query", return_value={"queryId": "q1"}) as mock_start:
             with patch.object(app.logs_client, "get_query_results", return_value={"status": "Complete", "results": []}):
@@ -254,6 +281,80 @@ class RecentMetricsCacheTests(unittest.TestCase):
         self.assertEqual(mock_invocation.call_count, 2)
         self.assertIn(60, app._metrics_cache)
         self.assertIn(1440, app._metrics_cache)
+
+
+def _user_row(user_id: str, input_tokens: str, output_tokens: str) -> list[dict[str, str]]:
+    return [
+        {"field": "raw_user_id", "value": user_id},
+        {"field": "input_tokens", "value": input_tokens},
+        {"field": "output_tokens", "value": output_tokens},
+    ]
+
+
+class TokenUsageByUserTests(unittest.TestCase):
+    def test_parses_per_user_token_totals(self) -> None:
+        results = [_user_row("a@example.com", "100", "200"), _user_row("b@example.com", "50", "60")]
+        with patch.object(app.logs_client, "start_query", return_value={"queryId": "q1"}):
+            with patch.object(app.logs_client, "get_query_results", return_value={"status": "Complete", "results": results}):
+                usage = app._token_usage_by_user(60)
+
+        self.assertEqual(
+            usage,
+            [
+                {"user_id": "a@example.com", "input_tokens": 100, "output_tokens": 200},
+                {"user_id": "b@example.com", "input_tokens": 50, "output_tokens": 60},
+            ],
+        )
+
+    def test_missing_user_id_falls_back_to_unknown(self) -> None:
+        # Insights omits the grouping field entirely when empty for every match (pre-user_id log lines).
+        results = [[{"field": "input_tokens", "value": "10"}, {"field": "output_tokens", "value": "20"}]]
+        with patch.object(app.logs_client, "start_query", return_value={"queryId": "q1"}):
+            with patch.object(app.logs_client, "get_query_results", return_value={"status": "Complete", "results": results}):
+                usage = app._token_usage_by_user(60)
+
+        self.assertEqual(usage, [{"user_id": "unknown", "input_tokens": 10, "output_tokens": 20}])
+
+
+class NotificationsByUserTests(unittest.TestCase):
+    def test_filters_to_notified_and_sorts_newest_first(self) -> None:
+        items = [
+            {"status": "notified", "seen_at": 100, "company_name": "A", "title": "Old", "url": "u1", "fit_score": 80},
+            {"status": "dismissed", "seen_at": 200, "company_name": "B", "title": "Nope", "url": "u2"},
+            {"status": "notified", "seen_at": 300, "company_name": "C", "title": "New", "url": "u3", "fit_score": 90},
+        ]
+        with patch.object(app, "list_all_users", return_value=[{"user_id": "a@example.com"}]):
+            with patch.object(app, "list_seen_listings", return_value=items):
+                result = app._notifications_by_user(60)
+
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["user_id"], "a@example.com")
+        self.assertEqual([n["title"] for n in result[0]["notifications"]], ["New", "Old"])
+
+    def test_returns_empty_list_with_no_users(self) -> None:
+        with patch.object(app, "list_all_users", return_value=[]):
+            self.assertEqual(app._notifications_by_user(60), [])
+
+    def test_looks_up_each_user_independently(self) -> None:
+        with patch.object(app, "list_all_users", return_value=[{"user_id": "a@example.com"}, {"user_id": "b@example.com"}]):
+            with patch.object(app, "list_seen_listings", return_value=[]) as mock_list:
+                app._notifications_by_user(60)
+
+        called_user_ids = {call.args[0] for call in mock_list.call_args_list}
+        self.assertEqual(called_user_ids, {"a@example.com", "b@example.com"})
+
+
+class AdminActivityCacheTests(unittest.TestCase):
+    def setUp(self) -> None:
+        app._admin_activity_cache = {}
+
+    def test_caches_within_ttl(self) -> None:
+        with patch.object(app, "_token_usage_by_user", return_value=[]) as mock_token:
+            with patch.object(app, "_notifications_by_user", return_value=[]):
+                app._admin_activity(1440)
+                app._admin_activity(1440)
+
+        mock_token.assert_called_once()
 
 
 if __name__ == "__main__":

@@ -14,7 +14,6 @@ from sources import Listing, Source, build_sources
 from sources.amazon import QUERY_BY_JOB_TYPE as AMAZON_QUERY_BY_JOB_TYPE
 from sources.amazon import AmazonJobsSource
 from sources.ashby import AshbySource
-from sources.direct import DirectSource
 from sources.oracle import OracleSource
 from sources.sitemap import SitemapSource
 from sources.workday import WorkdaySource
@@ -40,14 +39,11 @@ from users import (
 DEFAULT_JOB_TYPES = ["intern"]
 SOURCE_FAILURE_ALERT_THRESHOLD = 3
 JOB_TYPE_URL_FIELDS = {"intern": "intern_url", "newgrad": "newgrad_url", "fulltime": "fulltime_url"}
-ZYTE_FETCH_INTERVAL_SECONDS = 6 * 60 * 60
-# ponytail: OpenRouter calls are I/O-bound, so a thread pool turns N sequential calls into N/32.
-# Dropped to 8 briefly while on a free-tier model with a strict per-minute rate limit -
-# back to 32 now that the account is on a paid model (gpt-oss-120b) with real headroom.
-# A classifier failure no longer fails open and notifies regardless (see passes_classifier),
-# so even if a future model swap reintroduces heavy rate-limiting, it degrades to
-# "retry next run" rather than a notification storm.
+ZYTE_FETCH_INTERVAL_SECONDS = 4 * 60 * 60
+# I/O-bound OpenRouter calls - a thread pool cuts N sequential calls to N/32; safe to raise since a classifier failure now fails closed (see passes_classifier), not open.
 CLASSIFIER_CONCURRENCY = 32
+# Unlike CLASSIFIER_CONCURRENCY, each fetch hits a different company's domain - no shared endpoint to respect, so this can run high (sequential fetching wasted 47s+/run).
+FETCH_CONCURRENCY = 25
 # ponytail: Zyte is billed per request, unlike every other source kind - gate it
 # to a 6h cadence here (at source-selection time, not inside ZyteSource itself)
 # rather than giving it its own CloudWatch schedule. This piggybacks on the
@@ -137,11 +133,7 @@ def build_job_type_sources(
         if not entry:
             continue
         kind = entry.get("source_kind")
-        if kind == "direct":
-            url = _job_type_url(entry, job_type)
-            if url:
-                sources.append(DirectSource(str(entry["company_name"]), str(url), job_type))
-        elif kind == "ashby":
+        if kind == "ashby":
             board_name = entry.get("board_name")
             if board_name:
                 sources.append(AshbySource(str(entry["company_name"]), str(board_name), job_type))
@@ -183,6 +175,7 @@ def passes_classifier(
     fit_prompt: str,
     listing: Listing,
     resume_text: str | None = None,
+    user_id: str | None = None,
 ) -> ClassificationResult | None:
     """fits=True means "notify". Disabled (no key, no prompt, or unedited placeholder
     prompt) fails open, since there's nothing to check against. An API failure
@@ -194,7 +187,7 @@ def passes_classifier(
     if not classifier_enabled(openrouter_api_key, fit_prompt):
         return ClassificationResult(fits=True, reason="classifier disabled")
     try:
-        return is_good_fit(openrouter_api_key, classifier_model, fit_prompt, listing, resume_text)
+        return is_good_fit(openrouter_api_key, classifier_model, fit_prompt, listing, resume_text, user_id=user_id)
     except ClassifierError as error:
         print(
             f"Classifier failed for {listing.company_name} - {listing.title}, will retry next run: {error}",
@@ -203,34 +196,43 @@ def passes_classifier(
         return None
 
 
+def _fetch_one_source(source: Source) -> tuple[Source, list[Listing] | Exception]:
+    try:
+        return source, source.fetch()
+    except Exception as error:  # a single broken source must not block the rest
+        return source, error
+
+
 def fetch_all_listings(sources: list[Source]) -> tuple[list[Listing], list[str]]:
-    """Returns (listings, source names that just crossed the failure-alert threshold)."""
+    """Returns (listings, source names that just crossed the failure-alert threshold). Fetches run concurrently; side effects happen back on this thread as results arrive, not inside worker threads."""
     all_listings: list[Listing] = []
     newly_unhealthy: list[str] = []
-    for source in sources:
-        try:
-            listings = source.fetch()
-        except Exception as error:  # a single broken source must not block the rest
-            print(f"Source '{source.name}' failed: {error}", file=sys.stderr)
-            consecutive_failures = record_source_failure(source.name)
-            if consecutive_failures >= SOURCE_FAILURE_ALERT_THRESHOLD and not is_source_alerted(source.name):
-                newly_unhealthy.append(source.name)
-                mark_source_alerted(source.name)
-            continue
-        record_source_success(source.name)
-        print(f"Source '{source.name}': {len(listings)} matching listing(s)")
-        all_listings.extend(listings)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=FETCH_CONCURRENCY) as executor:
+        for source, result in executor.map(_fetch_one_source, sources):
+            if isinstance(result, Exception):
+                print(f"Source '{source.name}' failed: {result}", file=sys.stderr)
+                consecutive_failures = record_source_failure(source.name)
+                if consecutive_failures >= SOURCE_FAILURE_ALERT_THRESHOLD and not is_source_alerted(source.name):
+                    newly_unhealthy.append(source.name)
+                    mark_source_alerted(source.name)
+                continue
+            record_source_success(source.name)
+            print(f"Source '{source.name}': {len(result)} matching listing(s)")
+            all_listings.extend(result)
     return all_listings, newly_unhealthy
 
 
 def _check_listing_validity(
     listing: Listing, openrouter_api_key: str, classifier_model: str
 ) -> tuple[bool, str]:
+    """Prints the validator's rejection here, once per unique listing - not in process_user, which would misattribute a shared verdict once per user who sees it."""
     try:
         is_job_posting, reason = check_is_job_posting(openrouter_api_key, classifier_model, listing)
     except ClassifierError as error:
         print(f"Validity check failed for {listing.company_name} - {listing.title}, assuming valid: {error}", file=sys.stderr)
         is_job_posting, reason = True, f"validity check error, assumed valid: {error}"
+    if not is_job_posting:
+        print(f"validator rejected: {listing.company_name} - {listing.title} ({reason}) [validator: {classifier_model}]")
     save_listing_validity(listing.unique_id, is_job_posting=is_job_posting, reason=reason)
     return is_job_posting, reason
 
@@ -367,7 +369,7 @@ def process_user(
         with concurrent.futures.ThreadPoolExecutor(max_workers=CLASSIFIER_CONCURRENCY) as executor:
             futures = {
                 executor.submit(
-                    passes_classifier, openrouter_api_key, classifier_model, fit_prompt, listing, resume_text
+                    passes_classifier, openrouter_api_key, classifier_model, fit_prompt, listing, resume_text, user_id
                 ): listing
                 for listing in listings_needing_classification
             }
@@ -375,19 +377,11 @@ def process_user(
                 listing = futures[future]
                 classifications[listing.unique_id] = future.result()
 
-    # Two distinct stages, named explicitly so logs never leave it ambiguous which
-    # one ruled on a listing: the validator (check_is_job_posting, shared across
-    # users) confirms it's a real posting at all; the classifier (is_good_fit, per
-    # user) then checks it against this user's fit criteria. The model name goes
-    # in the log line only, not the stored/displayed reason - the Listings page
-    # shows the raw LLM reason text as-is; which model produced it is an
-    # operational detail for the logs (and already in the structured
-    # classifier_call/validity_check JSON lines), not something to show users.
+    # Model name goes in the log line only (below), not the stored/displayed reason - the Listings page shows the raw LLM reason text as-is.
     for listing in new_listings:
         is_job_posting, invalid_reason = listing_validity.get(listing.unique_id, (True, ""))
         if not is_job_posting:
             record_listings(user_id, [(listing, "invalid", invalid_reason, None)])
-            print(f"User {user_id}: validator rejected: {listing.company_name} - {listing.title} ({invalid_reason}) [validator: {classifier_model}]")
             continue
         classification = classifications[listing.unique_id]
         if classification is None:

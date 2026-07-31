@@ -135,6 +135,10 @@ def check_is_job_posting(api_key: str, model: str, listing: Listing) -> tuple[bo
         "You are checking scraped career-page data for junk. Determine whether the given text/link is an "
         "actual job posting, as opposed to scraped page furniture (nav link, footer link, cookie notice, "
         "image caption, pagination, etc.).\n\n"
+        "Some sources only capture a title and link, never a description - a missing description is common "
+        "and expected, not itself a sign of junk. Judge primarily on whether the title, company, and location "
+        "read as a plausible, specific real job (a distinct role, not a nav label or placeholder), not on "
+        "whether a description happens to be present.\n\n"
         'Respond with a JSON object: {"is_job_posting": true or false, "reason": "one short sentence explaining why"}.'
     )
     parsed, usage = _call_openrouter(
@@ -180,6 +184,7 @@ def is_good_fit(
     resume_text: str | None = None,
     max_attempts: int = 2,
     request_timeout_seconds: int = REQUEST_TIMEOUT_SECONDS,
+    user_id: str | None = None,
 ) -> ClassificationResult:
     listing_text = (
         f"Company: {listing.company_name}\n"
@@ -196,6 +201,8 @@ def is_good_fit(
     if resume_text:
         properties["fit_score"] = {
             "type": "integer",
+            "minimum": 0,
+            "maximum": 100,
             "description": "0-100 score for how well the candidate's resume matches this listing",
         }
         required.append("fit_score")
@@ -205,19 +212,21 @@ def is_good_fit(
     parsed, usage = _call_openrouter(
         api_key, model, system_content, listing_text, properties, required, max_attempts, request_timeout_seconds
     )
+    # schema minimum/maximum is a hint, not a guarantee - a model returned a stray year (2022) as the score once, so it's clamped here too.
+    raw_fit_score = int(parsed["fit_score"]) if "fit_score" in parsed else None
     result = ClassificationResult(
         fits=bool(parsed["fits"]),
         reason=str(parsed["reason"]),
-        fit_score=int(parsed["fit_score"]) if "fit_score" in parsed else None,
+        fit_score=max(0, min(100, raw_fit_score)) if raw_fit_score is not None else None,
     )
 
-    # JSON, not plain text: CloudWatch metric filters can only extract a
-    # numeric value like input_tokens out of a structured log line.
+    # JSON, not plain text: CloudWatch metric filters can only extract a numeric value like input_tokens out of a structured log line.
     print(
         json.dumps(
             {
                 "event": "classifier_call",
                 "model": model,
+                "user_id": user_id,
                 "fit": result.fits,
                 "fit_score": result.fit_score,
                 "input_tokens": int(usage.get("prompt_tokens", 0)),

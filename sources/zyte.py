@@ -33,7 +33,7 @@ class ZyteMisconfigured(RuntimeError):
 
 
 class ZyteSource:
-    """Scrapes a company's careers page via Zyte's browser-rendering API - handles anti-bot sites Jina/DirectSource can't. Costs real money per request - throttle how often callers actually fetch it."""
+    """Scrapes a company's careers page via Zyte's browser-rendering API - handles anti-bot sites a plain scrape or Jina Reader can't. Costs real money per request - throttle how often callers actually fetch it."""
 
     def __init__(self, company_name: str, url: str, job_type: str) -> None:
         self.name = f"zyte:{company_name}:{job_type}"

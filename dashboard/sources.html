@@ -68,7 +68,6 @@ __SIDEBAR__
           <option value="community">Community filter only</option>
           <option value="greenhouse">Greenhouse-backed</option>
           <option value="ashby">Ashby-backed</option>
-          <option value="direct">Direct scrape (own careers site)</option>
           <option value="zyte">Zyte-backed (paid, anti-bot bypass)</option>
         </select>
         <button @click="addCompany()"
@@ -113,9 +112,9 @@ __SIDEBAR__
             <tr class="border-b border-neutral-100 dark:border-neutral-900 last:border-0">
               <td class="px-3 py-2 break-words" x-text="company.company_name"></td>
               <td class="px-3 py-2 font-mono text-xs break-all" x-text="sourceLabel(company)"></td>
-              <td class="px-3 py-2 text-neutral-500 dark:text-neutral-500" x-text="jobTypesLabel(company)"></td>
-              <td class="px-3 py-2 font-mono text-xs text-neutral-500 dark:text-neutral-500" x-text="lastSuccess(company)"></td>
-              <td class="px-3 py-2 font-mono text-xs text-neutral-500 dark:text-neutral-500" x-text="lastFailure(company)"></td>
+              <td class="px-3 py-2" x-text="jobTypesLabel(company)"></td>
+              <td class="px-3 py-2 font-mono text-xs" x-text="lastSuccess(company)"></td>
+              <td class="px-3 py-2 font-mono text-xs" x-text="lastFailure(company)"></td>
               <td class="px-3 py-2" x-text="successRate(company)"></td>
               <td class="px-3 py-2 text-right">
                 <button @click="openModal(company)"
@@ -157,6 +156,12 @@ __SIDEBAR__
 
 <script src="/shared.js"></script>
 <script>
+function formatLocalDate(unixSeconds) {
+  const date = new Date(unixSeconds * 1000);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}/${pad(date.getMonth() + 1)}/${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
 document.addEventListener("alpine:init", () => {
   Alpine.data("sourcesPage", () => ({
     companies: [],
@@ -254,14 +259,14 @@ document.addEventListener("alpine:init", () => {
       const rows = this.getCompanyHealthRows(company);
       if (rows.length === 0) return "Never run";
       const at = Math.max(...rows.map((r) => r.last_success_at || 0)) || null;
-      return at ? new Date(at * 1000).toISOString().replace(/\.\d{3}Z$/, "Z") : "-";
+      return at ? formatLocalDate(at) : "-";
     },
 
     lastFailure(company) {
       const rows = this.getCompanyHealthRows(company);
       if (rows.length === 0) return "Never run";
       const at = Math.max(...rows.map((r) => r.last_failure_at || 0)) || null;
-      return at ? new Date(at * 1000).toISOString().replace(/\.\d{3}Z$/, "Z") : "-";
+      return at ? formatLocalDate(at) : "-";
     },
 
     successRate(company) {
@@ -310,7 +315,7 @@ document.addEventListener("alpine:init", () => {
       if (kind === "sitemap") {
         return [...urlFields, ["Fetched via", "public sitemap.xml (titles approximated from URL slugs)"]];
       }
-      if (kind === "direct" || kind === "zyte" || kind === "apple" || kind === "google") {
+      if (kind === "zyte" || kind === "apple" || kind === "google") {
         return urlFields;
       }
       // community - single shared scraper, no per-company config at all

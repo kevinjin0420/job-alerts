@@ -32,6 +32,7 @@ function revealAdminNav(isAdmin) {
   document.getElementById("admin-nav-link").classList.toggle("hidden", !isAdmin);
   document.getElementById("logs-nav-link").classList.toggle("hidden", !isAdmin);
   document.getElementById("sources-nav-link").classList.toggle("hidden", !isAdmin);
+  document.getElementById("activity-nav-link").classList.toggle("hidden", !isAdmin);
   document.getElementById("admin-nav-separator").classList.toggle("hidden", !isAdmin);
 }
 

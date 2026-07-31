@@ -101,6 +101,7 @@ PAGES = {
         "/config": "config.html",
         "/logs": "logs.html",
         "/admin": "admin.html",
+        "/activity": "activity.html",
         "/sources": "sources.html",
         "/profile": "profile.html",
         "/onboarding": "onboarding.html",
@@ -109,6 +110,8 @@ PAGES = {
 SHARED_JS = (Path(__file__).parent / "shared.js").read_text()
 
 FAILURE_MARKERS = ("fail", "Fail", "FAIL", "Error", "ERROR", "Traceback")
+# These lines embed the classifier's free-text reasoning, which often contains "fail"/"Error" as ordinary words (e.g. "Fails multiple criteria") - not an actual failure.
+NON_FAILURE_LINE_MARKERS = ("classifier dismissed:", "validator rejected:")
 
 
 def handler(event: dict[str, Any], _context: object) -> dict[str, Any]:
@@ -466,6 +469,11 @@ def _handle_admin(method: str, path: str, event: dict[str, Any], admin_user_id: 
         lambda_client.invoke(FunctionName=WATCH_FUNCTION_NAME, InvocationType="Event")
         return _json_response(200, {"status": "triggered"})
 
+    if method == "GET" and path == "/api/admin/activity":
+        range_key = (event.get("queryStringParameters") or {}).get("range", DEFAULT_METRICS_RANGE)
+        minutes = METRICS_RANGE_PRESETS_MINUTES.get(range_key, METRICS_RANGE_PRESETS_MINUTES[DEFAULT_METRICS_RANGE])
+        return _json_response(200, _admin_activity(minutes))
+
     return _json_response(404, {"error": "not found"})
 
 
@@ -520,13 +528,10 @@ def _recent_log_events(hours: int = 24, limit: int = 500) -> list[dict[str, Any]
         if timestamp is None:
             continue
         message = fields.get("@message", "").rstrip("\n")
-        events.append(
-            {
-                "timestamp": timestamp,
-                "message": message,
-                "is_failure": any(marker in message for marker in FAILURE_MARKERS),
-            }
+        is_failure = not any(marker in message for marker in NON_FAILURE_LINE_MARKERS) and any(
+            marker in message for marker in FAILURE_MARKERS
         )
+        events.append({"timestamp": timestamp, "message": message, "is_failure": is_failure})
     return events
 
 
@@ -713,6 +718,77 @@ def _token_usage_series(minutes: int) -> list[dict[str, Any]]:
         )
     parsed.sort(key=lambda item: item["timestamp"])
     return parsed
+
+
+def _token_usage_by_user(minutes: int) -> list[dict[str, Any]]:
+    """Per-user spend from classifier_call only - validity_check is shared/deduplicated across users, not attributable to one. Calls before user_id logging existed fall into "unknown"."""
+    query_string = (
+        "fields @message"
+        " | filter @message like /classifier_call/"
+        " | parse @message /\"user_id\":\\s*\"(?<raw_user_id>[^\"]*)\"/"
+        " | parse @message /\"input_tokens\":\\s*(?<raw_input>\\d+)/"
+        " | parse @message /\"output_tokens\":\\s*(?<raw_output>\\d+)/"
+        " | stats sum(raw_input) as input_tokens, sum(raw_output) as output_tokens by raw_user_id"
+        " | sort input_tokens desc"
+    )
+    parsed: list[dict[str, Any]] = []
+    for row in _run_insights_query(query_string, minutes):
+        fields = {field["field"]: field["value"] for field in row}
+        parsed.append(
+            {
+                "user_id": fields.get("raw_user_id") or "unknown",
+                "input_tokens": int(float(fields.get("input_tokens", 0))),
+                "output_tokens": int(float(fields.get("output_tokens", 0))),
+            }
+        )
+    return parsed
+
+
+def _notifications_by_user(minutes: int) -> list[dict[str, Any]]:
+    """Each user's notified listings within the window, from DynamoDB. Per-user lookups run concurrently since each is its own full-history scan."""
+    since = time.time() - minutes * 60
+    user_ids = [str(user["user_id"]) for user in list_all_users()]
+
+    def notifications_for(user_id: str) -> dict[str, Any]:
+        notifications = [
+            {
+                "company_name": item.get("company_name", ""),
+                "title": item.get("title", ""),
+                "url": item.get("url", ""),
+                "seen_at": item.get("seen_at", 0),
+                "fit_score": item.get("fit_score"),
+            }
+            for item in list_seen_listings(user_id, since=since)
+            if item.get("status") == "notified"
+        ]
+        notifications.sort(key=lambda item: item["seen_at"], reverse=True)
+        return {"user_id": user_id, "notifications": notifications}
+
+    if not user_ids:
+        return []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, len(user_ids))) as executor:
+        return list(executor.map(notifications_for, user_ids))
+
+
+ADMIN_ACTIVITY_CACHE_TTL_SECONDS = 20
+_admin_activity_cache: dict[int, tuple[float, dict[str, Any]]] = {}
+
+
+def _admin_activity(minutes: int) -> dict[str, Any]:
+    now = time.time()
+    cached = _admin_activity_cache.get(minutes)
+    if cached is not None and now - cached[0] < ADMIN_ACTIVITY_CACHE_TTL_SECONDS:
+        return cached[1]
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+        token_future = executor.submit(_token_usage_by_user, minutes)
+        notifications_future = executor.submit(_notifications_by_user, minutes)
+        result = {
+            "token_usage_by_user": token_future.result(),
+            "notifications_by_user": notifications_future.result(),
+        }
+    _admin_activity_cache[minutes] = (now, result)
+    return result
 
 
 def _invocation_metrics(start_time: float, end_time: float) -> dict[str, Any]:

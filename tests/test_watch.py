@@ -6,7 +6,14 @@ from unittest.mock import patch
 
 from classifier import ClassificationResult, ClassifierError
 from sources.base import Listing
-from watch import _job_type_url, build_job_type_sources, passes_classifier, resolve_listing_validity
+from watch import (
+    SOURCE_FAILURE_ALERT_THRESHOLD,
+    _job_type_url,
+    build_job_type_sources,
+    fetch_all_listings,
+    passes_classifier,
+    resolve_listing_validity,
+)
 
 
 class BuildJobTypeSourcesZyteCooldownTests(unittest.TestCase):
@@ -94,6 +101,63 @@ class PassesClassifierFailureModeTests(unittest.TestCase):
         with patch("watch.is_good_fit", return_value=expected):
             result = passes_classifier("fake-key", "fake-model", "must be remote", _listing("1"))
         self.assertEqual(result, expected)
+
+
+class _FakeSource:
+    def __init__(self, name: str, listings: list[Listing] | None = None, error: Exception | None = None) -> None:
+        self.name = name
+        self._listings = listings or []
+        self._error = error
+
+    def fetch(self) -> list[Listing]:
+        if self._error is not None:
+            raise self._error
+        return self._listings
+
+
+class FetchAllListingsConcurrencyTests(unittest.TestCase):
+    """Sequential fetching was measured at 47s+ of pure network time across ~46 sources; now parallelized."""
+
+    def test_fetches_all_sources_and_aggregates_listings(self) -> None:
+        sources = [
+            _FakeSource("a", [_listing("1")]),
+            _FakeSource("b", [_listing("2"), _listing("3")]),
+        ]
+        with patch("watch.record_source_success"):
+            listings, unhealthy = fetch_all_listings(sources)
+
+        self.assertEqual(len(listings), 3)
+        self.assertEqual(unhealthy, [])
+
+    def test_one_source_failing_does_not_block_others(self) -> None:
+        sources = [_FakeSource("good", [_listing("1")]), _FakeSource("bad", error=RuntimeError("boom"))]
+        with patch("watch.record_source_success"):
+            with patch("watch.record_source_failure", return_value=1):
+                with patch("watch.is_source_alerted", return_value=False):
+                    listings, unhealthy = fetch_all_listings(sources)
+
+        self.assertEqual(len(listings), 1)
+        self.assertEqual(unhealthy, [])
+
+    def test_source_crossing_failure_threshold_is_reported_once(self) -> None:
+        sources = [_FakeSource("bad", error=RuntimeError("boom"))]
+        with patch("watch.record_source_failure", return_value=SOURCE_FAILURE_ALERT_THRESHOLD):
+            with patch("watch.is_source_alerted", return_value=False):
+                with patch("watch.mark_source_alerted") as mock_mark:
+                    listings, unhealthy = fetch_all_listings(sources)
+
+        self.assertEqual(unhealthy, ["bad"])
+        mock_mark.assert_called_once_with("bad")
+
+    def test_already_alerted_source_is_not_reported_again(self) -> None:
+        sources = [_FakeSource("bad", error=RuntimeError("boom"))]
+        with patch("watch.record_source_failure", return_value=SOURCE_FAILURE_ALERT_THRESHOLD):
+            with patch("watch.is_source_alerted", return_value=True):
+                with patch("watch.mark_source_alerted") as mock_mark:
+                    listings, unhealthy = fetch_all_listings(sources)
+
+        self.assertEqual(unhealthy, [])
+        mock_mark.assert_not_called()
 
 
 class ResolveListingValidityTests(unittest.TestCase):
