@@ -37,10 +37,10 @@ export const queryKeys = {
   config: ["config"] as const,
   options: ["options"] as const,
   profile: ["profile"] as const,
-  metrics: (range: string) => ["metrics", range] as const,
-  logs: ["logs"] as const,
-  logRuns: ["logs", "runs"] as const,
-  logSearch: (query: string) => ["logs", "search", query] as const,
+  metrics: (range: string, lambdaKey: string) => ["metrics", range, lambdaKey] as const,
+  logs: (lambdaKey: string) => ["logs", lambdaKey] as const,
+  logRuns: (lambdaKey: string) => ["logs", "runs", lambdaKey] as const,
+  logSearch: (query: string, lambdaKey: string) => ["logs", "search", lambdaKey, query] as const,
   adminUsers: ["admin", "users"] as const,
   adminSettings: ["admin", "settings"] as const,
   adminCompanies: ["admin", "companies"] as const,
@@ -104,42 +104,43 @@ export function useTestClassifier(): UseMutationResult<ClassifierTestResult, Err
   });
 }
 
-export function useMetrics(range: string): UseQueryResult<Metrics, Error> {
+export function useMetrics(range: string, lambdaKey: string): UseQueryResult<Metrics, Error> {
   return useQuery({
-    queryKey: queryKeys.metrics(range),
-    queryFn: () => apiRequest<Metrics>(`/api/metrics?range=${encodeURIComponent(range)}`),
+    queryKey: queryKeys.metrics(range, lambdaKey),
+    queryFn: () =>
+      apiRequest<Metrics>(`/api/metrics?range=${encodeURIComponent(range)}&lambda=${encodeURIComponent(lambdaKey)}`),
     refetchInterval: AUTO_REFRESH_MS,
   });
 }
 
-export function useLogs(): UseQueryResult<LogsResponse, Error> {
+export function useLogs(lambdaKey: string): UseQueryResult<LogsResponse, Error> {
   return useQuery({
-    queryKey: queryKeys.logs,
-    queryFn: () => apiRequest<LogsResponse>("/api/logs"),
+    queryKey: queryKeys.logs(lambdaKey),
+    queryFn: () => apiRequest<LogsResponse>(`/api/logs?lambda=${encodeURIComponent(lambdaKey)}`),
     refetchInterval: AUTO_REFRESH_MS,
   });
 }
 
 const LOG_RUNS_PAGE_SIZE = 5;
 
-export function useLogRuns(): UseInfiniteQueryResult<InfiniteData<LogRunsPage>, Error> {
+export function useLogRuns(lambdaKey: string): UseInfiniteQueryResult<InfiniteData<LogRunsPage>, Error> {
   return useInfiniteQuery({
-    queryKey: queryKeys.logRuns,
+    queryKey: queryKeys.logRuns(lambdaKey),
     queryFn: ({ pageParam }) =>
       apiRequest<LogRunsPage>(
-        `/api/logs?mode=runs&count=${LOG_RUNS_PAGE_SIZE}${pageParam !== null ? `&before=${pageParam}` : ""}`,
+        `/api/logs?lambda=${encodeURIComponent(lambdaKey)}&mode=runs&count=${LOG_RUNS_PAGE_SIZE}${pageParam !== null ? `&before=${pageParam}` : ""}`,
       ),
     initialPageParam: null as number | null,
     getNextPageParam: (lastPage) => lastPage.next_cursor,
   });
 }
 
-export function useLogSearch(query: string): UseInfiniteQueryResult<InfiniteData<LogSearchPage>, Error> {
+export function useLogSearch(query: string, lambdaKey: string): UseInfiniteQueryResult<InfiniteData<LogSearchPage>, Error> {
   return useInfiniteQuery({
-    queryKey: queryKeys.logSearch(query),
+    queryKey: queryKeys.logSearch(query, lambdaKey),
     queryFn: ({ pageParam }) =>
       apiRequest<LogSearchPage>(
-        `/api/logs?q=${encodeURIComponent(query)}${pageParam !== null ? `&before=${pageParam}` : ""}`,
+        `/api/logs?lambda=${encodeURIComponent(lambdaKey)}&q=${encodeURIComponent(query)}${pageParam !== null ? `&before=${pageParam}` : ""}`,
       ),
     initialPageParam: null as number | null,
     getNextPageParam: (lastPage) => lastPage.next_cursor,

@@ -8,6 +8,8 @@ import sys
 import time
 from typing import Any
 
+import boto3
+
 from classifier import MAX_ATTEMPTS as CLASSIFIER_MAX_ATTEMPTS
 from classifier import ClassificationResult, is_good_fit
 from llm import LLMCallError
@@ -44,6 +46,12 @@ from validator import check_is_job_posting
 DEFAULT_JOB_TYPES = ["intern"]
 SOURCE_FAILURE_ALERT_THRESHOLD = 3
 CLASSIFIER_HEALTH_KEY = "classifier:openrouter"
+# Same source-health table/threshold used for scraper sources and the classifier -
+# a Lambda "failing" here means it logged Errors in its own recent CloudWatch metrics,
+# checked once per watch run rather than via a separate CloudWatch Alarm/SNS topic.
+LAMBDA_HEALTH_FUNCTION_NAMES = {"lambda:dashboard": "job-alerts-dashboard", "lambda:renderer": "job-alerts-renderer"}
+LAMBDA_HEALTH_CHECK_WINDOW_MINUTES = 15
+cloudwatch_client = boto3.client("cloudwatch")
 JOB_TYPE_URL_FIELDS = {"intern": "intern_url", "newgrad": "newgrad_url", "fulltime": "fulltime_url"}
 # Shared by zyte and render - both render a page via a real browser; the cooldown avoids hammering
 # the same page (real money for zyte, just courtesy for render, but the same interval works for both).
@@ -246,21 +254,36 @@ def passes_classifier(
     return result
 
 
-def _fetch_one_source(source: Source) -> tuple[Source, list[Listing] | Exception]:
+def _fetch_one_source(source: Source) -> tuple[Source, list[Listing] | Exception, float]:
+    started = time.monotonic()
     try:
-        return source, source.fetch()
+        return source, source.fetch(), (time.monotonic() - started) * 1000
     except Exception as error:  # a single broken source must not block the rest
-        return source, error
+        return source, error, (time.monotonic() - started) * 1000
 
 
-def fetch_all_listings(sources: list[Source]) -> tuple[list[Listing], list[str]]:
-    """Returns (listings, source names that just crossed the failure-alert threshold). Fetches run concurrently; side effects happen back on this thread as results arrive, not inside worker threads."""
+def _source_kind(source: Source) -> str:
+    """Every Source's .name is f"{kind}:{company_name}:{job_type}" - reuse that
+    instead of adding a separate `kind` attribute to the Source protocol."""
+    return source.name.split(":", 1)[0]
+
+
+def fetch_all_listings(sources: list[Source]) -> tuple[list[Listing], list[str], int]:
+    """Returns (listings, source names that just crossed the failure-alert threshold,
+    sources_failed count). Fetches run concurrently; side effects happen back on this
+    thread as results arrive, not inside worker threads."""
     all_listings: list[Listing] = []
     newly_unhealthy: list[str] = []
+    sources_failed = 0
     with concurrent.futures.ThreadPoolExecutor(max_workers=FETCH_CONCURRENCY) as executor:
-        for source, result in executor.map(_fetch_one_source, sources):
+        for source, result, duration_ms in executor.map(_fetch_one_source, sources):
             if isinstance(result, Exception):
+                sources_failed += 1
                 print(f"Source '{source.name}' failed: {result}", file=sys.stderr)
+                print(json.dumps({
+                    "event": "source_fetch", "source": source.name, "kind": _source_kind(source),
+                    "success": False, "duration_ms": round(duration_ms), "listing_count": 0,
+                }))
                 consecutive_failures = record_source_failure(source.name)
                 if consecutive_failures >= SOURCE_FAILURE_ALERT_THRESHOLD and not is_source_alerted(source.name):
                     newly_unhealthy.append(source.name)
@@ -268,8 +291,12 @@ def fetch_all_listings(sources: list[Source]) -> tuple[list[Listing], list[str]]
                 continue
             record_source_success(source.name)
             print(f"Source '{source.name}': {len(result)} matching listing(s)")
+            print(json.dumps({
+                "event": "source_fetch", "source": source.name, "kind": _source_kind(source),
+                "success": True, "duration_ms": round(duration_ms), "listing_count": len(result),
+            }))
             all_listings.extend(result)
-    return all_listings, newly_unhealthy
+    return all_listings, newly_unhealthy, sources_failed
 
 
 def _check_listing_validity(
@@ -356,6 +383,57 @@ def alert_admins_classifier_failing(error: str, smtp_user: str, smtp_pass: str) 
         "left unseen and retried next run, not notified."
     )
     _notify_all_admins("job-alerts: classifier failing", body, smtp_user, smtp_pass)
+
+
+def _lambda_recent_errors(function_name: str, window_minutes: int) -> float:
+    end_time = time.time()
+    start_time = end_time - window_minutes * 60
+    response = cloudwatch_client.get_metric_data(
+        MetricDataQueries=[{
+            "Id": "errors",
+            "MetricStat": {
+                "Metric": {"Namespace": "AWS/Lambda", "MetricName": "Errors", "Dimensions": [{"Name": "FunctionName", "Value": function_name}]},
+                "Period": window_minutes * 60,
+                "Stat": "Sum",
+            },
+        }],
+        StartTime=start_time,
+        EndTime=end_time,
+        ScanBy="TimestampDescending",
+    )
+    values = response["MetricDataResults"][0]["Values"]
+    return values[0] if values else 0.0
+
+
+def check_lambda_health() -> list[str]:
+    """Same source-health/alert-once machinery fetch_all_listings uses for scraper
+    sources, applied to dashboard/renderer via their own CloudWatch Errors metric -
+    reuses the existing DynamoDB dedup latch and alert_admins path rather than
+    standing up CloudWatch Alarms/SNS for two more Lambdas. A CloudWatch hiccup here
+    must not fail the scan itself, so failures are swallowed and logged."""
+    newly_unhealthy: list[str] = []
+    for health_key, function_name in LAMBDA_HEALTH_FUNCTION_NAMES.items():
+        try:
+            errors = _lambda_recent_errors(function_name, LAMBDA_HEALTH_CHECK_WINDOW_MINUTES)
+        except Exception as error:
+            print(f"Lambda health check for {function_name} failed: {error}", file=sys.stderr)
+            continue
+        if errors > 0:
+            consecutive_failures = record_source_failure(health_key)
+            if consecutive_failures >= SOURCE_FAILURE_ALERT_THRESHOLD and not is_source_alerted(health_key):
+                newly_unhealthy.append(health_key)
+                mark_source_alerted(health_key)
+        else:
+            record_source_success(health_key)
+    return newly_unhealthy
+
+
+def alert_admins_lambda_failing(unhealthy_lambdas: list[str], smtp_user: str, smtp_pass: str) -> None:
+    body = (
+        f"These Lambdas have logged CloudWatch Errors on {SOURCE_FAILURE_ALERT_THRESHOLD}+ consecutive "
+        f"checks ({LAMBDA_HEALTH_CHECK_WINDOW_MINUTES}m lookback each): {', '.join(unhealthy_lambdas)}"
+    )
+    _notify_all_admins("job-alerts: lambda failing", body, smtp_user, smtp_pass)
 
 
 def _resolve_resume_text(user_id: str) -> str | None:
@@ -481,6 +559,7 @@ def process_user(
 
 
 def main() -> int:
+    run_started = time.monotonic()
     smtp_user = os.environ.get("SMTP_USER")
     smtp_pass = os.environ.get("SMTP_PASS")
     if not smtp_user or not smtp_pass:
@@ -512,9 +591,13 @@ def main() -> int:
         return 1
     shared_sources.extend(build_job_type_sources(all_job_type_pairs, catalog))
 
-    all_listings, newly_unhealthy_sources = fetch_all_listings(shared_sources)
+    all_listings, newly_unhealthy_sources, sources_failed = fetch_all_listings(shared_sources)
     if newly_unhealthy_sources:
         alert_admins(newly_unhealthy_sources, smtp_user, smtp_pass)
+
+    newly_unhealthy_lambdas = check_lambda_health()
+    if newly_unhealthy_lambdas:
+        alert_admins_lambda_failing(newly_unhealthy_lambdas, smtp_user, smtp_pass)
 
     # Checked once here, shared across every user - see resolve_listing_validity's docstring.
     listing_validity = resolve_listing_validity(all_listings, openrouter_api_key, llm_model)
@@ -542,6 +625,9 @@ def main() -> int:
         "new": total_new,
         "notified": total_notified,
         "dismissed": total_dismissed,
+        "run_duration_ms": round((time.monotonic() - run_started) * 1000),
+        "sources_scanned": len(shared_sources),
+        "sources_failed": sources_failed,
     }))
     return 1 if had_notification_failure else 0
 

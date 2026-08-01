@@ -23,11 +23,15 @@ export const handler = async (event) => {
   }
   const waitMs = (event && event.waitMs) || DEFAULT_WAIT_MS;
 
+  const startedAt = Date.now();
+  console.log(`[renderer] ${url} starting (waitMs=${waitMs})`);
+
   const browser = await chromium.launch({
     args: [...sparticuzChromium.args, "--disable-blink-features=AutomationControlled"],
     executablePath: await sparticuzChromium.executablePath(),
     headless: true,
   });
+  const launchedAt = Date.now();
 
   try {
     const context = await browser.newContext({
@@ -39,10 +43,35 @@ export const handler = async (event) => {
     const page = await context.newPage();
     // networkidle hangs indefinitely on pages with persistent background polling (e.g. ASML) -
     // domcontentloaded plus a fixed wait (same strategy Zyte's own waitForTimeout action uses) is more robust.
-    await page.goto(url, { waitUntil: "domcontentloaded", timeout: GOTO_TIMEOUT_MS });
+    const response = await page.goto(url, { waitUntil: "domcontentloaded", timeout: GOTO_TIMEOUT_MS });
+    const navigatedAt = Date.now();
     await page.waitForTimeout(waitMs);
     const html = await page.content();
+    const totalMs = Date.now() - startedAt;
+    console.log(
+      JSON.stringify({
+        event: "render_success",
+        url,
+        waitMs,
+        status: response ? response.status() : null,
+        launchMs: launchedAt - startedAt,
+        gotoMs: navigatedAt - launchedAt,
+        totalMs,
+        bytes: html.length,
+      }),
+    );
     return { html };
+  } catch (error) {
+    console.error(
+      JSON.stringify({
+        event: "render_failure",
+        url,
+        waitMs,
+        elapsedMs: Date.now() - startedAt,
+        error: error.message,
+      }),
+    );
+    throw error;
   } finally {
     await browser.close();
   }

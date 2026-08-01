@@ -5,12 +5,14 @@ import { RangeSelect, RefreshButton } from "../components/RangeSelect";
 import { SkeletonBar } from "../components/Skeleton";
 import { TimeSeriesChart } from "../components/charts/TimeSeriesChart";
 import { formatLocalDate } from "../lib/formatDate";
+import { LAMBDA_OPTIONS } from "../lib/lambdas";
 import { DEFAULT_RANGE, resolveRange } from "../lib/ranges";
 import { useLocalStorage } from "../lib/useLocalStorage";
 
-// Matches aws/config.env's SCHEDULE_RATE.
+// Matches aws/config.env's SCHEDULE_RATE - only watch runs on a cron schedule.
 const SCHEDULE_INTERVAL_SECONDS = 300;
 const RANGE_STORAGE_KEY = "job-alerts-metrics-range";
+const LAMBDA_STORAGE_KEY = "job-alerts-metrics-lambda";
 
 interface ListingCounts {
   total: number;
@@ -40,26 +42,63 @@ function formatPercent(numerator: number, denominator: number): string {
   return `${((numerator / denominator) * 100).toFixed(1)}%`;
 }
 
-function buildSections(metrics: Metrics, counts: ListingCounts): Array<{ title: string; cards: Array<[string, string]> }> {
+function formatRatioPercent(ratio: number | null): string {
+  return ratio === null ? "-" : `${(ratio * 100).toFixed(1)}%`;
+}
+
+function formatMemory(usedMb: number | null, sizeMb: number | null): string {
+  if (usedMb === null || sizeMb === null) {
+    return "-";
+  }
+  return `${Math.round(usedMb)} / ${sizeMb} MB`;
+}
+
+function buildSections(
+  metrics: Metrics,
+  counts: ListingCounts,
+  lambdaKey: string,
+): Array<{ title: string; cards: Array<[string, string]> }> {
   const nextRunAt = metrics.last_ran ? Date.parse(metrics.last_ran) + SCHEDULE_INTERVAL_SECONDS * 1000 : null;
-  return [
-    {
-      title: "Schedule",
+  const sections: Array<{ title: string; cards: Array<[string, string]> }> = [];
+
+  const healthCards: Array<[string, string]> = [
+    [
+      "Sources healthy",
+      `${metrics.source_health.healthy_count} / ${metrics.source_health.healthy_count + metrics.source_health.unhealthy_count}`,
+    ],
+    ["Zyte calls (paid)", formatNumber(metrics.zyte_calls)],
+  ];
+
+  if (lambdaKey === "watch") {
+    sections.push({
+      title: "Schedule & Health",
       cards: [
         ["Last ran", metrics.last_ran ? formatLocalDate(Date.parse(metrics.last_ran) / 1000) : "-"],
         ["Next scheduled run", nextRunAt ? formatLocalDate(nextRunAt / 1000) : "-"],
+        ...healthCards,
       ],
-    },
-    {
-      title: "Execution",
-      cards: [
-        ["Invocations", formatNumber(metrics.invocations)],
-        ["Errors", formatNumber(metrics.errors)],
-        ["Success rate", formatPercent(metrics.invocations - (metrics.errors ?? 0), metrics.invocations)],
-        ["Avg duration (ms)", formatNumber(metrics.avg_duration_ms)],
-      ],
-    },
-    {
+    });
+  } else {
+    sections.push({ title: "Health", cards: healthCards });
+  }
+
+  const executionCards: Array<[string, string]> = [
+    ["Invocations", formatNumber(metrics.invocations)],
+    ["Errors", formatNumber(metrics.errors)],
+    ["Success rate", formatPercent(metrics.invocations - (metrics.errors ?? 0), metrics.invocations)],
+    ["Avg duration (ms)", formatNumber(metrics.avg_duration_ms)],
+    ["P95 duration (ms)", formatNumber(metrics.p95_duration_ms)],
+    ["Throttles", formatNumber(metrics.throttles)],
+    ["Cold start rate", formatRatioPercent(metrics.cold_start_rate)],
+    ["Memory used / configured", formatMemory(metrics.avg_memory_used_mb, metrics.memory_size_mb)],
+  ];
+  if (lambdaKey === "dashboard") {
+    executionCards.push(["Auth rejections", formatNumber(metrics.auth_rejected_count)]);
+  }
+  sections.push({ title: "Execution", cards: executionCards });
+
+  if (lambdaKey === "watch") {
+    sections.push({
       title: "Listings",
       cards: [
         ["Total tracked", formatNumber(counts.total)],
@@ -67,14 +106,17 @@ function buildSections(metrics: Metrics, counts: ListingCounts): Array<{ title: 
         ["Dismissed", formatNumber(counts.dismissed)],
         ["Seeded (first run)", formatNumber(counts.seeded)],
       ],
-    },
-  ];
+    });
+  }
+
+  return sections;
 }
 
 export function MetricsPage() {
   const [rangeValue, setRangeValue] = useLocalStorage(RANGE_STORAGE_KEY, DEFAULT_RANGE);
+  const [lambdaKey, setLambdaKey] = useLocalStorage(LAMBDA_STORAGE_KEY, "watch");
   const range = resolveRange(rangeValue);
-  const metrics = useMetrics(range.value);
+  const metrics = useMetrics(range.value, lambdaKey);
   const listings = useListings(range.value);
 
   const refresh = () => {
@@ -84,11 +126,22 @@ export function MetricsPage() {
 
   const isPending = metrics.isPending || listings.isPending;
   const sections =
-    metrics.data && listings.data ? buildSections(metrics.data, countByStatus(listings.data.listings)) : [];
+    metrics.data && listings.data ? buildSections(metrics.data, countByStatus(listings.data.listings), lambdaKey) : [];
 
   return (
     <>
       <PageHeader title="Metrics">
+        <select
+          value={lambdaKey}
+          onChange={(event) => setLambdaKey(event.target.value)}
+          className="text-xs px-2 py-1.5 rounded-none border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 focus:outline-none focus:ring-1 focus:ring-neutral-500"
+        >
+          {LAMBDA_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
         <RangeSelect value={range.value} onChange={setRangeValue} />
         <RefreshButton onClick={refresh} />
       </PageHeader>
@@ -132,42 +185,62 @@ export function MetricsPage() {
             title="Duration"
             series={[{ key: "value", label: "Duration (ms)", colorIndex: 0 }]}
             data={metrics.data?.duration_series ?? []}
-            windowMinutes={range.minutes}
             yFormat={(value) => `${Math.round(value)}ms`}
             yAxisLabel="Duration (ms)"
           />
-          <TimeSeriesChart
-            title="Validator backlog"
-            series={[{ key: "count", label: "Uncached listings", colorIndex: 1 }]}
-            data={metrics.data?.backlog_series ?? []}
-            windowMinutes={range.minutes}
-            yFormat={(value) => String(Math.round(value))}
-            yAxisLabel="Listings"
-          />
-          <TimeSeriesChart
-            title="Listings processed"
-            series={[
-              { key: "new", label: "New", colorIndex: 0 },
-              { key: "notified", label: "Notified", colorIndex: 1 },
-              { key: "dismissed", label: "Dismissed", colorIndex: 2 },
-            ]}
-            data={metrics.data?.throughput_series ?? []}
-            windowMinutes={range.minutes}
-            yFormat={(value) => String(Math.round(value))}
-            yAxisLabel="Listings"
-          />
-          <TimeSeriesChart
-            title="Token usage"
-            series={[
-              { key: "input_tokens", label: "Input tokens", colorIndex: 0 },
-              { key: "output_tokens", label: "Output tokens", colorIndex: 1 },
-            ]}
-            data={metrics.data?.token_usage_series ?? []}
-            windowMinutes={range.minutes}
-            yFormat={(value) => Math.round(value).toLocaleString()}
-            yAxisLabel="Tokens"
-            emptyMeansZero
-          />
+          {lambdaKey === "watch" && (
+            <>
+              <TimeSeriesChart
+                title="Validator backlog"
+                series={[{ key: "count", label: "Uncached listings", colorIndex: 1 }]}
+                data={metrics.data?.backlog_series ?? []}
+                yFormat={(value) => String(Math.round(value))}
+                yAxisLabel="Listings"
+              />
+              <TimeSeriesChart
+                title="Listings processed"
+                series={[
+                  { key: "new", label: "New", colorIndex: 0 },
+                  { key: "notified", label: "Notified", colorIndex: 1 },
+                  { key: "dismissed", label: "Dismissed", colorIndex: 2 },
+                ]}
+                data={metrics.data?.throughput_series ?? []}
+                yFormat={(value) => String(Math.round(value))}
+                yAxisLabel="Listings"
+              />
+              <TimeSeriesChart
+                title="Token usage"
+                series={[
+                  { key: "input_tokens", label: "Input tokens", colorIndex: 0 },
+                  { key: "output_tokens", label: "Output tokens", colorIndex: 1 },
+                ]}
+                data={metrics.data?.token_usage_series ?? []}
+                yFormat={(value) => Math.round(value).toLocaleString()}
+                yAxisLabel="Tokens"
+              />
+            </>
+          )}
+          {lambdaKey === "renderer" && (
+            <>
+              <TimeSeriesChart
+                title="Render outcomes"
+                series={[
+                  { key: "success_count", label: "Success", colorIndex: 1 },
+                  { key: "failure_count", label: "Failure", colorIndex: 2 },
+                ]}
+                data={metrics.data?.render_series ?? []}
+                yFormat={(value) => String(Math.round(value))}
+                yAxisLabel="Renders"
+              />
+              <TimeSeriesChart
+                title="Render duration"
+                series={[{ key: "avg_total_ms", label: "Avg total (ms)", colorIndex: 0 }]}
+                data={metrics.data?.render_series ?? []}
+                yFormat={(value) => `${Math.round(value)}ms`}
+                yAxisLabel="Duration (ms)"
+              />
+            </>
+          )}
         </div>
       </section>
     </>

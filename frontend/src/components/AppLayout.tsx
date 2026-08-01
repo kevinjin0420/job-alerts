@@ -73,7 +73,7 @@ export function AppLayout() {
 
 export function PageHeader({ title, children }: { title: string; children?: ReactNode }) {
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 mb-6 shrink-0">
+    <div className="flex flex-wrap items-center justify-between gap-3 mb-6 shrink-0 min-h-8">
       <h2 className="text-xs font-semibold tracking-widest uppercase text-neutral-500 dark:text-neutral-500">
         {title}
       </h2>

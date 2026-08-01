@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import sys
 import time
@@ -13,11 +14,14 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "watch"))
 from classifier import ClassificationResult
 from watch import (
     CLASSIFIER_HEALTH_KEY,
+    LAMBDA_HEALTH_FUNCTION_NAMES,
     SOURCE_FAILURE_ALERT_THRESHOLD,
     _ashby_job_type_tag,
     _job_type_url,
+    _source_kind,
     _url_job_type_tag,
     build_job_type_sources,
+    check_lambda_health,
     fetch_all_listings,
     passes_classifier,
     resolve_listing_validity,
@@ -231,6 +235,65 @@ class ClassifierFailureAlertingTests(unittest.TestCase):
         mock_alert.assert_not_called()
 
 
+class LambdaHealthCheckTests(unittest.TestCase):
+    """check_lambda_health reuses the same alert-once-until-recovery latch as source health, driven by CloudWatch Errors instead of a fetch exception."""
+
+    def test_no_errors_records_success_for_both_lambdas(self) -> None:
+        with patch("watch._lambda_recent_errors", return_value=0.0):
+            with patch("watch.record_source_success") as mock_success:
+                with patch("watch.record_source_failure") as mock_failure:
+                    newly_unhealthy = check_lambda_health()
+
+        self.assertEqual(newly_unhealthy, [])
+        mock_failure.assert_not_called()
+        self.assertEqual(mock_success.call_count, len(LAMBDA_HEALTH_FUNCTION_NAMES))
+
+    def test_errors_crossing_threshold_reports_once(self) -> None:
+        with patch("watch._lambda_recent_errors", return_value=1.0):
+            with patch("watch.record_source_failure", return_value=SOURCE_FAILURE_ALERT_THRESHOLD):
+                with patch("watch.is_source_alerted", return_value=False):
+                    with patch("watch.mark_source_alerted") as mock_mark:
+                        newly_unhealthy = check_lambda_health()
+
+        self.assertEqual(set(newly_unhealthy), set(LAMBDA_HEALTH_FUNCTION_NAMES.keys()))
+        self.assertEqual(mock_mark.call_count, len(LAMBDA_HEALTH_FUNCTION_NAMES))
+
+    def test_already_alerted_is_not_reported_again(self) -> None:
+        with patch("watch._lambda_recent_errors", return_value=1.0):
+            with patch("watch.record_source_failure", return_value=SOURCE_FAILURE_ALERT_THRESHOLD):
+                with patch("watch.is_source_alerted", return_value=True):
+                    with patch("watch.mark_source_alerted") as mock_mark:
+                        newly_unhealthy = check_lambda_health()
+
+        self.assertEqual(newly_unhealthy, [])
+        mock_mark.assert_not_called()
+
+    def test_below_threshold_does_not_alert(self) -> None:
+        with patch("watch._lambda_recent_errors", return_value=1.0):
+            with patch("watch.record_source_failure", return_value=1):
+                with patch("watch.mark_source_alerted") as mock_mark:
+                    newly_unhealthy = check_lambda_health()
+
+        self.assertEqual(newly_unhealthy, [])
+        mock_mark.assert_not_called()
+
+    def test_cloudwatch_error_is_swallowed_and_does_not_block_other_lambda(self) -> None:
+        with patch("watch._lambda_recent_errors", side_effect=RuntimeError("boom")):
+            with patch("watch.record_source_success") as mock_success:
+                with patch("watch.record_source_failure") as mock_failure:
+                    newly_unhealthy = check_lambda_health()
+
+        self.assertEqual(newly_unhealthy, [])
+        mock_success.assert_not_called()
+        mock_failure.assert_not_called()
+
+
+class SourceKindTests(unittest.TestCase):
+    def test_derives_kind_from_colon_separated_name(self) -> None:
+        self.assertEqual(_source_kind(_FakeSource("renderer:Roblox:intern")), "renderer")
+        self.assertEqual(_source_kind(_FakeSource("zyte:Tesla:newgrad")), "zyte")
+
+
 class _FakeSource:
     def __init__(self, name: str, listings: list[Listing] | None = None, error: Exception | None = None) -> None:
         self.name = name
@@ -252,17 +315,40 @@ class FetchAllListingsConcurrencyTests(unittest.TestCase):
             _FakeSource("b", [_listing("2"), _listing("3")]),
         ]
         with patch("watch.record_source_success"):
-            listings, unhealthy = fetch_all_listings(sources)
+            listings, unhealthy, sources_failed = fetch_all_listings(sources)
 
         self.assertEqual(len(listings), 3)
         self.assertEqual(unhealthy, [])
+        self.assertEqual(sources_failed, 0)
+
+    def test_emits_source_fetch_event_per_source(self) -> None:
+        sources = [_FakeSource("renderer:Roblox:intern", [_listing("1")])]
+        with patch("watch.record_source_success"):
+            with patch("builtins.print") as mock_print:
+                fetch_all_listings(sources)
+
+        printed = [call.args[0] for call in mock_print.call_args_list]
+        event_lines = [json.loads(line) for line in printed if line.startswith('{"event": "source_fetch"')]
+        self.assertEqual(len(event_lines), 1)
+        self.assertEqual(event_lines[0]["source"], "renderer:Roblox:intern")
+        self.assertEqual(event_lines[0]["kind"], "renderer")
+        self.assertTrue(event_lines[0]["success"])
+        self.assertEqual(event_lines[0]["listing_count"], 1)
+
+    def test_failed_source_counts_toward_sources_failed(self) -> None:
+        sources = [_FakeSource("bad", error=RuntimeError("boom"))]
+        with patch("watch.record_source_failure", return_value=1):
+            with patch("watch.is_source_alerted", return_value=False):
+                _, _, sources_failed = fetch_all_listings(sources)
+
+        self.assertEqual(sources_failed, 1)
 
     def test_one_source_failing_does_not_block_others(self) -> None:
         sources = [_FakeSource("good", [_listing("1")]), _FakeSource("bad", error=RuntimeError("boom"))]
         with patch("watch.record_source_success"):
             with patch("watch.record_source_failure", return_value=1):
                 with patch("watch.is_source_alerted", return_value=False):
-                    listings, unhealthy = fetch_all_listings(sources)
+                    listings, unhealthy, _ = fetch_all_listings(sources)
 
         self.assertEqual(len(listings), 1)
         self.assertEqual(unhealthy, [])
@@ -272,7 +358,7 @@ class FetchAllListingsConcurrencyTests(unittest.TestCase):
         with patch("watch.record_source_failure", return_value=SOURCE_FAILURE_ALERT_THRESHOLD):
             with patch("watch.is_source_alerted", return_value=False):
                 with patch("watch.mark_source_alerted") as mock_mark:
-                    listings, unhealthy = fetch_all_listings(sources)
+                    listings, unhealthy, _ = fetch_all_listings(sources)
 
         self.assertEqual(unhealthy, ["bad"])
         mock_mark.assert_called_once_with("bad")
@@ -282,7 +368,7 @@ class FetchAllListingsConcurrencyTests(unittest.TestCase):
         with patch("watch.record_source_failure", return_value=SOURCE_FAILURE_ALERT_THRESHOLD):
             with patch("watch.is_source_alerted", return_value=True):
                 with patch("watch.mark_source_alerted") as mock_mark:
-                    listings, unhealthy = fetch_all_listings(sources)
+                    listings, unhealthy, _ = fetch_all_listings(sources)
 
         self.assertEqual(unhealthy, [])
         mock_mark.assert_not_called()

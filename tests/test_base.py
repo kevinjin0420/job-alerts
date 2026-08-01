@@ -64,6 +64,40 @@ class FetchUrlRetryTests(unittest.TestCase):
         mock_urlopen.assert_called_once()
         mock_sleep.assert_not_called()
 
+    def test_retries_on_read_timeout_then_succeeds(self) -> None:
+        with patch(
+            "sources.base.urllib.request.urlopen",
+            side_effect=[TimeoutError("The read operation timed out"), _mock_response(b"ok")],
+        ) as mock_urlopen:
+            with patch("sources.base.time.sleep") as mock_sleep:
+                body = fetch_url("test", "https://example.com")
+
+        self.assertEqual(body, b"ok")
+        self.assertEqual(mock_urlopen.call_count, 2)
+        mock_sleep.assert_called_once()
+
+    def test_gives_up_after_max_attempts_on_repeated_timeout(self) -> None:
+        with patch(
+            "sources.base.urllib.request.urlopen", side_effect=TimeoutError("The read operation timed out")
+        ) as mock_urlopen:
+            with patch("sources.base.time.sleep"):
+                with self.assertRaises(TimeoutError):
+                    fetch_url("test", "https://example.com")
+
+        self.assertEqual(mock_urlopen.call_count, MAX_FETCH_ATTEMPTS)
+
+    def test_retries_on_url_error(self) -> None:
+        with patch(
+            "sources.base.urllib.request.urlopen",
+            side_effect=[urllib.error.URLError("DNS lookup failed"), _mock_response(b"ok")],
+        ) as mock_urlopen:
+            with patch("sources.base.time.sleep") as mock_sleep:
+                body = fetch_url("test", "https://example.com")
+
+        self.assertEqual(body, b"ok")
+        self.assertEqual(mock_urlopen.call_count, 2)
+        mock_sleep.assert_called_once()
+
 
 class LooksLikeJobPostingUrlTests(unittest.TestCase):
     def test_matches_numeric_path_segment(self) -> None:

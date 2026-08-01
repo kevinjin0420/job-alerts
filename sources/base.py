@@ -91,7 +91,7 @@ def fetch_url(
     timeout: int = 30,
     data: bytes | None = None,
 ) -> bytes:
-    """GETs (or POSTs, when data is given - urllib implies POST from a non-None body) a URL, logging status/timing. Retries with backoff on a transient status (429/5xx); a hard failure (403, 404, etc.) still propagates immediately."""
+    """GETs (or POSTs, when data is given - urllib implies POST from a non-None body) a URL, logging status/timing. Retries with backoff on a transient status (429/5xx) or a connection-level failure (timeout, DNS, reset); a hard failure (403, 404, etc.) still propagates immediately."""
     request = urllib.request.Request(url, data=data, headers=headers or {})
     method = request.get_method()
     for attempt in range(MAX_FETCH_ATTEMPTS):
@@ -111,6 +111,19 @@ def fetch_url(
                 raise
             print(
                 f"[{source_name}] {method} {url} -> {error.code} ({elapsed_ms}ms), "
+                f"retrying (attempt {attempt + 1}/{MAX_FETCH_ATTEMPTS})"
+            )
+        except (TimeoutError, urllib.error.URLError) as error:
+            # Not an HTTPError - no status code to gate on, but a timeout/DNS-blip/reset
+            # is exactly as transient as a 429/5xx, so it gets the same retry budget
+            # instead of failing on the very first attempt (HTTPError is a URLError
+            # subclass, so this branch never shadows the more specific one above).
+            elapsed_ms = round((time.monotonic() - started) * 1000)
+            is_last_attempt = attempt == MAX_FETCH_ATTEMPTS - 1
+            if is_last_attempt:
+                raise
+            print(
+                f"[{source_name}] {method} {url} -> {error} ({elapsed_ms}ms), "
                 f"retrying (attempt {attempt + 1}/{MAX_FETCH_ATTEMPTS})"
             )
     raise AssertionError("unreachable - loop above always returns or raises")

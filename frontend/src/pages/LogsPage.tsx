@@ -5,9 +5,11 @@ import type { LogEvent, LogRun } from "../api/types";
 import { PageHeader } from "../components/AppLayout";
 import { RefreshButton } from "../components/RangeSelect";
 import { SkeletonBar } from "../components/Skeleton";
+import { LAMBDA_OPTIONS } from "../lib/lambdas";
 import { useLocalStorage } from "../lib/useLocalStorage";
 
 const VIEW_MODE_STORAGE_KEY = "job-alerts-logs-view-mode";
+const LAMBDA_STORAGE_KEY = "job-alerts-logs-lambda";
 const SEARCH_DEBOUNCE_MS = 400;
 
 type ViewMode = "flat" | "runs";
@@ -103,14 +105,15 @@ function ErrorState({ text }: { text: string }) {
 
 export function LogsPage() {
   const [viewMode, setViewMode] = useLocalStorage<ViewMode>(VIEW_MODE_STORAGE_KEY, "flat");
+  const [lambdaKey, setLambdaKey] = useLocalStorage(LAMBDA_STORAGE_KEY, "watch");
   const [failuresOnly, setFailuresOnly] = useState(false);
   const [searchInput, setSearchInput] = useState("");
   const searchQuery = useDebouncedValue(searchInput.trim(), SEARCH_DEBOUNCE_MS);
   const isSearching = searchQuery.length > 0;
 
-  const logs = useLogs();
-  const runsQuery = useLogRuns();
-  const searchResults = useLogSearch(searchQuery);
+  const logs = useLogs(lambdaKey);
+  const runsQuery = useLogRuns(lambdaKey);
+  const searchResults = useLogSearch(searchQuery, lambdaKey);
 
   const activeClass = "bg-neutral-900 dark:bg-neutral-100 text-white dark:text-neutral-900";
   const inactiveClass = "hover:bg-neutral-100 dark:hover:bg-neutral-900";
@@ -208,6 +211,17 @@ export function LogsPage() {
   return (
     <>
       <PageHeader title="Logs">
+        <select
+          value={lambdaKey}
+          onChange={(event) => setLambdaKey(event.target.value)}
+          className="text-xs px-2 py-1.5 rounded-none border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 focus:outline-none focus:ring-1 focus:ring-neutral-500"
+        >
+          {LAMBDA_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
         <input
           type="text"
           placeholder="Search logs..."

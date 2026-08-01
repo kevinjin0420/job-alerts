@@ -67,6 +67,27 @@ class GroupLogRunsTests(unittest.TestCase):
         self.assertEqual(app._group_log_runs([]), [])
 
 
+class ParseLogEventRowTests(unittest.TestCase):
+    def test_strips_node_runtime_prefix(self) -> None:
+        row = _insights_row(
+            "2026-08-01 16:37:53.799",
+            "2026-08-01T16:37:53.799Z 460356c3-25af-4cb0-97fd-7b81e6fbbd15 INFO [renderer] starting",
+        )
+
+        event = app._parse_log_event_row(row)
+
+        assert event is not None
+        self.assertEqual(event["message"], "[renderer] starting")
+
+    def test_leaves_message_without_runtime_prefix_untouched(self) -> None:
+        row = _insights_row("2026-08-01 16:37:53.799", "START RequestId: abc Version: $LATEST")
+
+        event = app._parse_log_event_row(row)
+
+        assert event is not None
+        self.assertEqual(event["message"], "START RequestId: abc Version: $LATEST")
+
+
 class RunBoundariesTests(unittest.TestCase):
     def test_returns_request_id_and_start_epoch_newest_first(self) -> None:
         results = [
@@ -75,7 +96,7 @@ class RunBoundariesTests(unittest.TestCase):
         ]
         with patch.object(app.logs_client, "start_query", return_value={"queryId": "q1"}):
             with patch.object(app.logs_client, "get_query_results", return_value={"status": "Complete", "results": results}):
-                boundaries = app._run_boundaries(1785600000, 2, app.RUN_LOOKBACK_MINUTES)
+                boundaries = app._run_boundaries(app.WATCH_LOG_GROUP, 1785600000, 2, app.RUN_LOOKBACK_MINUTES)
 
         self.assertEqual([request_id for request_id, _ in boundaries], ["run2", "run1"])
         expected_epoch = datetime(2026, 8, 1, 0, 0, 0, tzinfo=timezone.utc).timestamp()
@@ -86,7 +107,7 @@ class FetchRunsPageTests(unittest.TestCase):
     def test_no_boundaries_returns_empty_page(self) -> None:
         with patch.object(app.logs_client, "start_query", return_value={"queryId": "q1"}):
             with patch.object(app.logs_client, "get_query_results", return_value={"status": "Complete", "results": []}):
-                page = app._fetch_runs_page(None, 5)
+                page = app._fetch_runs_page(app.WATCH_LOG_GROUP, None, 5)
 
         self.assertEqual(page, {"runs": [], "next_cursor": None})
 
@@ -102,7 +123,7 @@ class FetchRunsPageTests(unittest.TestCase):
         }
         with patch.object(app.logs_client, "start_query", return_value={"queryId": "q1"}):
             with patch.object(app.logs_client, "get_query_results", side_effect=[boundary_results, raw_line_results]) as mock_results:
-                page = app._fetch_runs_page(None, 1)
+                page = app._fetch_runs_page(app.WATCH_LOG_GROUP, None, 1)
 
         self.assertEqual(mock_results.call_count, 2, "one boundary query, one raw-lines query")
         self.assertEqual(len(page["runs"]), 1)
@@ -115,7 +136,7 @@ class FetchRunsPageTests(unittest.TestCase):
         raw_line_results = {"status": "Complete", "results": [_insights_row("2026-08-01 00:00:03.000", "START RequestId: req-1 Version: $LATEST")]}
         with patch.object(app.logs_client, "start_query", return_value={"queryId": "q1"}):
             with patch.object(app.logs_client, "get_query_results", side_effect=[boundary_results, raw_line_results]):
-                page = app._fetch_runs_page(None, 5)
+                page = app._fetch_runs_page(app.WATCH_LOG_GROUP, None, 5)
 
         self.assertIsNone(page["next_cursor"])
 
@@ -130,7 +151,7 @@ class FetchRunsPageTests(unittest.TestCase):
         raw_line_results = {"status": "Complete", "results": boundary_results["results"]}
         with patch.object(app.logs_client, "start_query", return_value={"queryId": "q1"}):
             with patch.object(app.logs_client, "get_query_results", side_effect=[boundary_results, raw_line_results]):
-                page = app._fetch_runs_page(None, 2)
+                page = app._fetch_runs_page(app.WATCH_LOG_GROUP, None, 2)
 
         oldest_epoch = datetime(2026, 8, 1, 0, 0, 0, tzinfo=timezone.utc).timestamp()
         self.assertEqual(page["next_cursor"], oldest_epoch - 1)
@@ -144,7 +165,7 @@ class SearchLogLinesTests(unittest.TestCase):
         ]
         with patch.object(app.logs_client, "start_query", return_value={"queryId": "q1"}) as mock_start:
             with patch.object(app.logs_client, "get_query_results", return_value={"status": "Complete", "results": results}):
-                page = app._search_log_lines("apple", None, 200)
+                page = app._search_log_lines(app.WATCH_LOG_GROUP, "apple", None, 200)
 
         self.assertEqual(len(page["events"]), 2)
         self.assertIn("apple", page["events"][0]["message"])
@@ -154,7 +175,7 @@ class SearchLogLinesTests(unittest.TestCase):
     def test_quotes_and_backslashes_are_escaped_not_executed_as_regex(self) -> None:
         with patch.object(app.logs_client, "start_query", return_value={"queryId": "q1"}) as mock_start:
             with patch.object(app.logs_client, "get_query_results", return_value={"status": "Complete", "results": []}):
-                app._search_log_lines('a"b\\c', None, 200)
+                app._search_log_lines(app.WATCH_LOG_GROUP, 'a"b\\c', None, 200)
 
         sent_query = mock_start.call_args.kwargs["queryString"]
         self.assertIn('like "a\\"b\\\\c"', sent_query)
@@ -163,11 +184,27 @@ class SearchLogLinesTests(unittest.TestCase):
         one_result = {"status": "Complete", "results": [_insights_row("2026-08-01 00:00:00.000", "match")]}
         with patch.object(app.logs_client, "start_query", return_value={"queryId": "q1"}):
             with patch.object(app.logs_client, "get_query_results", return_value=one_result):
-                full_page = app._search_log_lines("match", None, 1)
-                short_page = app._search_log_lines("match", None, 5)
+                full_page = app._search_log_lines(app.WATCH_LOG_GROUP, "match", None, 1)
+                short_page = app._search_log_lines(app.WATCH_LOG_GROUP, "match", None, 5)
 
         self.assertIsNotNone(full_page["next_cursor"])
         self.assertIsNone(short_page["next_cursor"])
+
+
+class LogGroupResolutionTests(unittest.TestCase):
+    """The /api/logs handler resolves `lambda` against this fixed allowlist rather
+    than passing user input straight through to the CloudWatch API call - an
+    unrecognized or missing value must fall back to watch, never error or pass through."""
+
+    def test_each_known_key_resolves_to_its_own_log_group(self) -> None:
+        self.assertEqual(app.LOG_GROUPS_BY_LAMBDA["watch"], app.WATCH_LOG_GROUP)
+        self.assertEqual(app.LOG_GROUPS_BY_LAMBDA["dashboard"], app.DASHBOARD_LOG_GROUP)
+        self.assertEqual(app.LOG_GROUPS_BY_LAMBDA["renderer"], app.RENDERER_LOG_GROUP)
+
+    def test_unknown_or_missing_value_falls_back_to_watch(self) -> None:
+        fallback = app.LOG_GROUPS_BY_LAMBDA[app.DEFAULT_LAMBDA_KEY]
+        self.assertEqual(app.LOG_GROUPS_BY_LAMBDA.get("nonsense", fallback), app.WATCH_LOG_GROUP)
+        self.assertEqual(app.LOG_GROUPS_BY_LAMBDA.get("", fallback), app.WATCH_LOG_GROUP)
 
 
 if __name__ == "__main__":

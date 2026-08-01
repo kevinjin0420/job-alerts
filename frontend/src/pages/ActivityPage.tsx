@@ -89,7 +89,7 @@ export function ActivityPage() {
 
   return (
     <div className="flex flex-col min-h-0 flex-1">
-      <PageHeader title={`Activity · last ${range.label}`}>
+      <PageHeader title="Activity">
         <RangeSelect value={range.value} onChange={setRangeValue} />
         <RefreshButton onClick={() => void activity.refetch()} />
       </PageHeader>

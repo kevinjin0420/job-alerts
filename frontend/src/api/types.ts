@@ -102,15 +102,37 @@ export interface TokenUsagePoint {
   output_tokens: number;
 }
 
+export interface RenderPoint {
+  timestamp: string;
+  success_count: number;
+  failure_count: number;
+  avg_total_ms: number | null;
+}
+
+export interface SourceHealthSummary {
+  healthy_count: number;
+  unhealthy_count: number;
+}
+
 export interface Metrics {
   invocations: number;
   errors: number | null;
   avg_duration_ms: number | null;
+  throttles: number | null;
   last_ran: string | null;
+  cold_start_rate: number | null;
+  avg_memory_used_mb: number | null;
+  memory_size_mb: number | null;
+  p95_duration_ms: number | null;
+  source_health: SourceHealthSummary;
+  zyte_calls: number;
   duration_series: TimeSeriesValuePoint[];
-  throughput_series: ThroughputPoint[];
-  backlog_series: BacklogPoint[];
-  token_usage_series: TokenUsagePoint[];
+  // Only present for the lambda they're specific to - see dashboard/app.py's _recent_metrics.
+  throughput_series?: ThroughputPoint[];
+  backlog_series?: BacklogPoint[];
+  token_usage_series?: TokenUsagePoint[];
+  render_series?: RenderPoint[];
+  auth_rejected_count?: number;
 }
 
 export interface LogEvent {

@@ -153,7 +153,7 @@ class RecentLogEventsTests(unittest.TestCase):
         ]
         with patch.object(app.logs_client, "start_query", return_value={"queryId": "q1"}):
             with patch.object(app.logs_client, "get_query_results", return_value={"status": "Complete", "results": results}):
-                events = app._recent_log_events()
+                events = app._recent_log_events(app.WATCH_LOG_GROUP)
 
         self.assertEqual([event["message"] for event in events], ["second newest line", "oldest line"])
 
@@ -161,7 +161,7 @@ class RecentLogEventsTests(unittest.TestCase):
         results = [_insights_row("2026-07-30 21:14:00.000", "Traceback (most recent call last):\n")]
         with patch.object(app.logs_client, "start_query", return_value={"queryId": "q1"}):
             with patch.object(app.logs_client, "get_query_results", return_value={"status": "Complete", "results": results}):
-                events = app._recent_log_events()
+                events = app._recent_log_events(app.WATCH_LOG_GROUP)
 
         self.assertEqual(events[0]["message"], "Traceback (most recent call last):")
         self.assertTrue(events[0]["is_failure"])
@@ -180,7 +180,7 @@ class RecentLogEventsTests(unittest.TestCase):
         ]
         with patch.object(app.logs_client, "start_query", return_value={"queryId": "q1"}):
             with patch.object(app.logs_client, "get_query_results", return_value={"status": "Complete", "results": results}):
-                events = app._recent_log_events()
+                events = app._recent_log_events(app.WATCH_LOG_GROUP)
 
         self.assertFalse(events[0]["is_failure"])
         self.assertFalse(events[1]["is_failure"])
@@ -189,14 +189,14 @@ class RecentLogEventsTests(unittest.TestCase):
         results = [_insights_row("2026-07-30 21:14:00.000", "Source 'direct:Example:intern' failed: HTTP 429")]
         with patch.object(app.logs_client, "start_query", return_value={"queryId": "q1"}):
             with patch.object(app.logs_client, "get_query_results", return_value={"status": "Complete", "results": results}):
-                events = app._recent_log_events()
+                events = app._recent_log_events(app.WATCH_LOG_GROUP)
 
         self.assertTrue(events[0]["is_failure"])
 
     def test_requests_the_newest_n_directly_via_query_string(self) -> None:
         with patch.object(app.logs_client, "start_query", return_value={"queryId": "q1"}) as mock_start:
             with patch.object(app.logs_client, "get_query_results", return_value={"status": "Complete", "results": []}):
-                app._recent_log_events(limit=200)
+                app._recent_log_events(app.WATCH_LOG_GROUP, limit=200)
 
         query_string = mock_start.call_args.kwargs["queryString"]
         self.assertIn("sort @timestamp desc", query_string)
@@ -233,6 +233,7 @@ class InvocationMetricsPeriodTests(unittest.TestCase):
                     {"Id": "invocations", "Values": [1, 2]},
                     {"Id": "errors", "Values": [0]},
                     {"Id": "avg_duration_ms", "Values": [123.45]},
+                    {"Id": "throttles", "Values": [0]},
                 ]
             }
 
@@ -252,12 +253,13 @@ class InvocationMetricsPeriodTests(unittest.TestCase):
                     {"Id": "invocations", "Values": [1, 2]},
                     {"Id": "errors", "Values": [1]},
                     {"Id": "avg_duration_ms", "Values": [50.0]},
+                    {"Id": "throttles", "Values": [0]},
                 ]
             },
         ):
             result = app._invocation_metrics(start_time=0, end_time=300)
 
-        self.assertEqual(result, {"invocations": 3, "errors": 1, "avg_duration_ms": 50.0})
+        self.assertEqual(result, {"invocations": 3, "errors": 1, "avg_duration_ms": 50.0, "throttles": 0})
 
 
 class RecentMetricsCacheTests(unittest.TestCase):
@@ -271,11 +273,14 @@ class RecentMetricsCacheTests(unittest.TestCase):
             patch.object(app, "_duration_series", return_value=[]),
             patch.object(app, "_structured_log_series", return_value=[]),
             patch.object(app, "_token_usage_series", return_value=[]),
+            patch.object(app, "_report_line_stats", return_value={}),
+            patch.object(app, "_source_health_summary", return_value={"healthy_count": 0, "unhealthy_count": 0}),
+            patch.object(app, "_zyte_call_count", return_value=0),
         )
 
     def test_returns_cached_result_without_recomputing_within_ttl(self) -> None:
-        invocation_patch, last_ran_patch, duration_patch, structured_patch, token_patch = self._patch_dependencies()
-        with invocation_patch as mock_invocation, last_ran_patch, duration_patch, structured_patch, token_patch:
+        patches = self._patch_dependencies()
+        with patches[0] as mock_invocation, patches[1], patches[2], patches[3], patches[4], patches[5], patches[6], patches[7]:
             first = app._recent_metrics()
             second = app._recent_metrics()
 
@@ -283,24 +288,25 @@ class RecentMetricsCacheTests(unittest.TestCase):
         mock_invocation.assert_called_once()
 
     def test_recomputes_after_ttl_expires(self) -> None:
-        invocation_patch, last_ran_patch, duration_patch, structured_patch, token_patch = self._patch_dependencies()
-        with invocation_patch as mock_invocation, last_ran_patch, duration_patch, structured_patch, token_patch:
+        patches = self._patch_dependencies()
+        with patches[0] as mock_invocation, patches[1], patches[2], patches[3], patches[4], patches[5], patches[6], patches[7]:
             app._recent_metrics()
-            cached_at, cached_result = app._metrics_cache[1440]
-            app._metrics_cache[1440] = (cached_at - app.METRICS_CACHE_TTL_SECONDS - 1, cached_result)
+            cache_key = (1440, app.DEFAULT_LAMBDA_KEY)
+            cached_at, cached_result = app._metrics_cache[cache_key]
+            app._metrics_cache[cache_key] = (cached_at - app.METRICS_CACHE_TTL_SECONDS - 1, cached_result)
             app._recent_metrics()
 
         self.assertEqual(mock_invocation.call_count, 2)
 
     def test_different_ranges_are_cached_independently(self) -> None:
-        invocation_patch, last_ran_patch, duration_patch, structured_patch, token_patch = self._patch_dependencies()
-        with invocation_patch as mock_invocation, last_ran_patch, duration_patch, structured_patch, token_patch:
+        patches = self._patch_dependencies()
+        with patches[0] as mock_invocation, patches[1], patches[2], patches[3], patches[4], patches[5], patches[6], patches[7]:
             app._recent_metrics(60)
             app._recent_metrics(1440)
 
         self.assertEqual(mock_invocation.call_count, 2)
-        self.assertIn(60, app._metrics_cache)
-        self.assertIn(1440, app._metrics_cache)
+        self.assertIn((60, app.DEFAULT_LAMBDA_KEY), app._metrics_cache)
+        self.assertIn((1440, app.DEFAULT_LAMBDA_KEY), app._metrics_cache)
 
 
 def _user_row(user_id: str, input_tokens: str, output_tokens: str) -> list[dict[str, str]]:
@@ -375,6 +381,158 @@ class AdminActivityCacheTests(unittest.TestCase):
                 app._admin_activity(1440)
 
         mock_token.assert_called_once()
+
+
+def _stats_row(fields: dict[str, str]) -> list[dict[str, str]]:
+    return [{"field": key, "value": value} for key, value in fields.items()]
+
+
+class ReportLineStatsTests(unittest.TestCase):
+    def test_computes_cold_start_rate_and_memory_stats(self) -> None:
+        results = [
+            _stats_row(
+                {
+                    "total_count": "10",
+                    "cold_start_count": "2",
+                    "avg_memory_used_mb": "512.5",
+                    "configured_memory_mb": "2048",
+                    "p95_duration_ms": "1200.3",
+                }
+            )
+        ]
+        with patch.object(app.logs_client, "start_query", return_value={"queryId": "q1"}):
+            with patch.object(app.logs_client, "get_query_results", return_value={"status": "Complete", "results": results}):
+                stats = app._report_line_stats(app.WATCH_LOG_GROUP, 0, 3600)
+
+        self.assertEqual(
+            stats,
+            {"cold_start_rate": 0.2, "avg_memory_used_mb": 512.5, "memory_size_mb": 2048, "p95_duration_ms": 1200.3},
+        )
+
+    def test_no_rows_returns_all_none(self) -> None:
+        with patch.object(app.logs_client, "start_query", return_value={"queryId": "q1"}):
+            with patch.object(app.logs_client, "get_query_results", return_value={"status": "Complete", "results": []}):
+                stats = app._report_line_stats(app.WATCH_LOG_GROUP, 0, 3600)
+
+        self.assertEqual(
+            stats, {"cold_start_rate": None, "avg_memory_used_mb": None, "memory_size_mb": None, "p95_duration_ms": None}
+        )
+
+
+class SourceHealthSummaryTests(unittest.TestCase):
+    def test_counts_sources_at_or_above_threshold_as_unhealthy(self) -> None:
+        rows = [
+            {"source_name": "a", "consecutive_failures": 0},
+            {"source_name": "b", "consecutive_failures": app.SOURCE_FAILURE_ALERT_THRESHOLD},
+            {"source_name": "c", "consecutive_failures": app.SOURCE_FAILURE_ALERT_THRESHOLD + 5},
+        ]
+        with patch.object(app, "list_source_health", return_value=rows):
+            summary = app._source_health_summary()
+
+        self.assertEqual(summary, {"healthy_count": 1, "unhealthy_count": 2})
+
+    def test_empty_scan_is_all_zero(self) -> None:
+        with patch.object(app, "list_source_health", return_value=[]):
+            self.assertEqual(app._source_health_summary(), {"healthy_count": 0, "unhealthy_count": 0})
+
+
+class ZyteCallCountTests(unittest.TestCase):
+    def test_parses_count_from_stats_row(self) -> None:
+        with patch.object(app.logs_client, "start_query", return_value={"queryId": "q1"}):
+            with patch.object(
+                app.logs_client, "get_query_results", return_value={"status": "Complete", "results": [_stats_row({"total": "7"})]}
+            ):
+                self.assertEqual(app._zyte_call_count(60), 7)
+
+    def test_no_rows_is_zero(self) -> None:
+        with patch.object(app.logs_client, "start_query", return_value={"queryId": "q1"}):
+            with patch.object(app.logs_client, "get_query_results", return_value={"status": "Complete", "results": []}):
+                self.assertEqual(app._zyte_call_count(60), 0)
+
+
+class AuthRejectedCountTests(unittest.TestCase):
+    def test_parses_count_from_stats_row(self) -> None:
+        with patch.object(app.logs_client, "start_query", return_value={"queryId": "q1"}):
+            with patch.object(
+                app.logs_client, "get_query_results", return_value={"status": "Complete", "results": [_stats_row({"total": "3"})]}
+            ):
+                self.assertEqual(app._auth_rejected_count(60), 3)
+
+
+class RenderSeriesTests(unittest.TestCase):
+    def test_success_count_derived_from_total_ms_presence_and_bucket_zero_filled(self) -> None:
+        fake_now = datetime(2026, 7, 30, 21, 5, 0, tzinfo=timezone.utc).timestamp()
+        results = [_stats_row({"bucket": "2026-07-30 21:00:00.000", "total_count": "5", "success_count": "3", "avg_total_ms": "800.0"})]
+        with patch.object(app.logs_client, "start_query", return_value={"queryId": "q1"}):
+            with patch.object(app.logs_client, "get_query_results", return_value={"status": "Complete", "results": results}):
+                with patch("app.time.time", return_value=fake_now):
+                    series = app._render_series(10)
+
+        by_timestamp = {point["timestamp"]: point for point in series}
+        real_bucket = datetime(2026, 7, 30, 21, 0, 0, tzinfo=timezone.utc).isoformat()
+        self.assertEqual(by_timestamp[real_bucket]["success_count"], 3)
+        self.assertEqual(by_timestamp[real_bucket]["failure_count"], 2)
+        self.assertEqual(by_timestamp[real_bucket]["avg_total_ms"], 800.0)
+        other_buckets = [point for ts, point in by_timestamp.items() if ts != real_bucket]
+        self.assertTrue(other_buckets)
+        self.assertTrue(all(point["success_count"] == 0 and point["failure_count"] == 0 for point in other_buckets))
+
+    def test_zero_fills_buckets_with_no_activity(self) -> None:
+        with patch.object(app.logs_client, "start_query", return_value={"queryId": "q1"}):
+            with patch.object(app.logs_client, "get_query_results", return_value={"status": "Complete", "results": []}):
+                series = app._render_series(5)
+
+        self.assertTrue(len(series) > 0)
+        self.assertTrue(all(point["success_count"] == 0 and point["failure_count"] == 0 for point in series))
+
+
+class RecentMetricsLambdaSelectionTests(unittest.TestCase):
+    def setUp(self) -> None:
+        app._metrics_cache = {}
+
+    def _base_patches(self):
+        return (
+            patch.object(app, "_invocation_metrics", return_value={"invocations": 1}),
+            patch.object(app, "_last_invocation_time", return_value=None),
+            patch.object(app, "_duration_series", return_value=[]),
+            patch.object(app, "_report_line_stats", return_value={}),
+            patch.object(app, "_source_health_summary", return_value={"healthy_count": 0, "unhealthy_count": 0}),
+            patch.object(app, "_zyte_call_count", return_value=0),
+        )
+
+    def test_watch_includes_watch_only_series(self) -> None:
+        patches = self._base_patches()
+        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
+            with patch.object(app, "_structured_log_series", return_value=[]), patch.object(app, "_token_usage_series", return_value=[]):
+                result = app._recent_metrics(60, "watch")
+
+        self.assertIn("throughput_series", result)
+        self.assertIn("backlog_series", result)
+        self.assertIn("token_usage_series", result)
+        self.assertNotIn("render_series", result)
+        self.assertNotIn("auth_rejected_count", result)
+
+    def test_renderer_includes_render_series_only(self) -> None:
+        patches = self._base_patches()
+        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
+            with patch.object(app, "_render_series", return_value=[]) as mock_render:
+                result = app._recent_metrics(60, "renderer")
+
+        mock_render.assert_called_once()
+        self.assertIn("render_series", result)
+        self.assertNotIn("throughput_series", result)
+        self.assertNotIn("auth_rejected_count", result)
+
+    def test_dashboard_includes_auth_rejected_count_only(self) -> None:
+        patches = self._base_patches()
+        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
+            with patch.object(app, "_auth_rejected_count", return_value=0) as mock_auth:
+                result = app._recent_metrics(60, "dashboard")
+
+        mock_auth.assert_called_once()
+        self.assertIn("auth_rejected_count", result)
+        self.assertNotIn("throughput_series", result)
+        self.assertNotIn("render_series", result)
 
 
 if __name__ == "__main__":

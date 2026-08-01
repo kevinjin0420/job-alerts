@@ -8,7 +8,7 @@
       "Resource": "arn:aws:logs:*:863516093571:log-group:/aws/lambda/job-alerts-dashboard:*"
     },
     {
-      "Sid": "ReadWatchLogs",
+      "Sid": "ReadAppLogs",
       "Effect": "Allow",
       "Action": [
         "logs:FilterLogEvents",
@@ -16,7 +16,7 @@
         "logs:StopQuery",
         "logs:GetQueryResults"
       ],
-      "Resource": "arn:aws:logs:*:863516093571:log-group:/aws/lambda/job-alerts-watch:*"
+      "Resource": "arn:aws:logs:*:863516093571:log-group:/aws/lambda/job-alerts-*"
     },
     {
       "Sid": "TriggerWatch",

@@ -35,38 +35,23 @@ function toPlottedRows<T extends TimestampedPoint>(data: T[], series: SeriesDefi
   }));
 }
 
-function zeroFilledRows(seriesCount: number, windowMinutes: number): PlottedRow[] {
-  const now = Date.now();
-  const zeroRow = (milliseconds: number): PlottedRow => ({
-    timestamp: new Date(milliseconds).toISOString(),
-    values: Array.from({ length: seriesCount }, () => 0),
-  });
-  return [zeroRow(now - windowMinutes * 60 * 1000), zeroRow(now)];
-}
-
 export function TimeSeriesChart<T extends TimestampedPoint>({
   title,
   series,
   data,
-  windowMinutes,
   yFormat = (value: number) => String(value),
   yAxisLabel,
-  emptyMeansZero = false,
 }: {
   title: string;
   series: SeriesDefinition<T>[];
   data: T[];
-  windowMinutes: number;
   yFormat?: (value: number) => string;
   yAxisLabel?: string;
-  emptyMeansZero?: boolean;
 }) {
   const { isDark } = useTheme();
   const palette = chartPalette(isDark);
 
-  // Empty can mean genuinely zero activity rather than missing data.
-  const rows =
-    data.length === 0 && emptyMeansZero ? zeroFilledRows(series.length, windowMinutes) : toPlottedRows(data, series);
+  const rows = toPlottedRows(data, series);
 
   return (
     <ChartCard

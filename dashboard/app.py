@@ -57,6 +57,7 @@ from users import (
 
 # Inlined instead of importing watch.py, which would drag in every scraper module.
 DEFAULT_JOB_TYPES = ["intern"]
+SOURCE_FAILURE_ALERT_THRESHOLD = 3
 
 
 def _config_string_list(config: dict[str, Any], key: str) -> list[str]:
@@ -68,6 +69,13 @@ def _config_string_list(config: dict[str, Any], key: str) -> list[str]:
 
 WATCH_LOG_GROUP = "/aws/lambda/job-alerts-watch"
 WATCH_FUNCTION_NAME = "job-alerts-watch"
+DASHBOARD_LOG_GROUP = "/aws/lambda/job-alerts-dashboard"
+DASHBOARD_FUNCTION_NAME = "job-alerts-dashboard"
+RENDERER_LOG_GROUP = "/aws/lambda/job-alerts-renderer"
+RENDERER_FUNCTION_NAME = "job-alerts-renderer"
+LOG_GROUPS_BY_LAMBDA = {"watch": WATCH_LOG_GROUP, "dashboard": DASHBOARD_LOG_GROUP, "renderer": RENDERER_LOG_GROUP}
+LAMBDA_FUNCTION_NAMES = {"watch": WATCH_FUNCTION_NAME, "dashboard": DASHBOARD_FUNCTION_NAME, "renderer": RENDERER_FUNCTION_NAME}
+DEFAULT_LAMBDA_KEY = "watch"
 USER_POOL_ID = os.environ["COGNITO_USER_POOL_ID"]
 CLIENT_ID = os.environ["COGNITO_CLIENT_ID"]
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")
@@ -132,12 +140,14 @@ def handler(event: dict[str, Any], _context: object) -> dict[str, Any]:
 
     if method == "POST" and path == "/api/login":
         if _is_rate_limited(source_ip):
+            print(json.dumps({"event": "auth_rejected", "reason": "rate_limited", "path": "/api/login"}))
             return _json_response(429, {"error": "too many failed attempts, try again later"})
         return _handle_login(json.loads(event.get("body") or "{}"), source_ip)
 
     # Authenticated by the refresh token in the body, not a bearer header, so it sits above _authenticate.
     if method == "POST" and path == "/api/refresh":
         if _is_rate_limited(source_ip):
+            print(json.dumps({"event": "auth_rejected", "reason": "rate_limited", "path": "/api/refresh"}))
             return _json_response(429, {"error": "too many failed attempts, try again later"})
         return _handle_refresh(json.loads(event.get("body") or "{}"), source_ip)
 
@@ -223,18 +233,23 @@ def handler(event: dict[str, Any], _context: object) -> dict[str, Any]:
         if not is_admin:
             return _json_response(403, {"error": "admin only"})
         params = event.get("queryStringParameters") or {}
+        log_group = LOG_GROUPS_BY_LAMBDA.get(params.get("lambda", ""), LOG_GROUPS_BY_LAMBDA[DEFAULT_LAMBDA_KEY])
         query = params.get("q", "").strip()
         before = float(params["before"]) if params.get("before") else None
         if query:
-            return _json_response(200, _search_log_lines(query, before, SEARCH_PAGE_LIMIT))
+            return _json_response(200, _search_log_lines(log_group, query, before, SEARCH_PAGE_LIMIT))
         if params.get("mode") == "runs":
             count = int(params.get("count", DEFAULT_RUNS_PAGE_SIZE))
-            return _json_response(200, _fetch_runs_page(before, count))
-        return _json_response(200, {"events": _recent_log_events()})
+            return _json_response(200, _fetch_runs_page(log_group, before, count))
+        return _json_response(200, {"events": _recent_log_events(log_group)})
     if method == "GET" and path == "/api/metrics":
-        range_key = (event.get("queryStringParameters") or {}).get("range", DEFAULT_METRICS_RANGE)
+        params = event.get("queryStringParameters") or {}
+        range_key = params.get("range", DEFAULT_METRICS_RANGE)
         minutes = METRICS_RANGE_PRESETS_MINUTES.get(range_key, METRICS_RANGE_PRESETS_MINUTES[DEFAULT_METRICS_RANGE])
-        return _json_response(200, _recent_metrics(minutes))
+        lambda_key = params.get("lambda", DEFAULT_LAMBDA_KEY)
+        if lambda_key not in LAMBDA_FUNCTION_NAMES:
+            lambda_key = DEFAULT_LAMBDA_KEY
+        return _json_response(200, _recent_metrics(minutes, lambda_key))
     if method == "POST" and path == "/api/apikey":
         return _json_response(200, {"api_key": generate_api_key(user_id)})
     if method == "GET" and path == "/api/listings":
@@ -561,16 +576,27 @@ def _is_failure_line(message: str) -> bool:
     )
 
 
+_NODE_RUNTIME_LOG_PREFIX = re.compile(
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z\s+[0-9a-f-]{36}\s+(?:INFO|WARN|ERROR|DEBUG|TRACE)\s+"
+)
+
+
+def _strip_runtime_log_prefix(message: str) -> str:
+    """Node.js Lambda's console.log auto-prepends its own timestamp/requestId/level -
+    redundant with the CloudWatch event timestamp we already display, so drop it."""
+    return _NODE_RUNTIME_LOG_PREFIX.sub("", message, count=1)
+
+
 def _parse_log_event_row(row: list[dict[str, str]]) -> dict[str, Any] | None:
     fields = {field["field"]: field["value"] for field in row}
     timestamp = _parse_insights_timestamp(fields.get("@timestamp", ""))
     if timestamp is None:
         return None
-    message = fields.get("@message", "").rstrip("\n")
+    message = _strip_runtime_log_prefix(fields.get("@message", "").rstrip("\n"))
     return {"timestamp": timestamp, "message": message, "is_failure": _is_failure_line(message)}
 
 
-def _recent_log_events(hours: int = 24, limit: int = 500) -> list[dict[str, Any]]:
+def _recent_log_events(log_group: str, hours: int = 24, limit: int = 500) -> list[dict[str, Any]]:
     """Via Logs Insights, not FilterLogEvents - FilterLogEvents scans forward
     from startTime with no pagination here, so its `limit` filled up with the
     OLDEST events in the window (a single watch invocation alone can log
@@ -580,7 +606,7 @@ def _recent_log_events(hours: int = 24, limit: int = 500) -> list[dict[str, Any]
     query_string = f"fields @timestamp, @message | sort @timestamp desc | limit {limit}"
     end_time = time.time()
     start_time = end_time - hours * 3600
-    events = [_parse_log_event_row(row) for row in _run_insights_query(query_string, start_time, end_time)]
+    events = [_parse_log_event_row(row) for row in _run_insights_query(query_string, start_time, end_time, log_group)]
     return [event for event in events if event is not None]
 
 
@@ -648,7 +674,7 @@ def _group_log_runs(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return list(reversed(runs))
 
 
-def _run_boundaries(before: float, count: int, lookback_minutes: int) -> list[tuple[str, float]]:
+def _run_boundaries(log_group: str, before: float, count: int, lookback_minutes: int) -> list[tuple[str, float]]:
     """Up to `count` (request_id, start_epoch) pairs for the most recent START
     RequestId lines strictly before `before` - cheap and precise, since START lines
     are short and their timestamp *is* the run's start, so a page of N runs never
@@ -656,7 +682,7 @@ def _run_boundaries(before: float, count: int, lookback_minutes: int) -> list[tu
     query_string = f"fields @timestamp, @message | filter @message like /^START RequestId/ | sort @timestamp desc | limit {count}"
     start_time = before - lookback_minutes * 60
     boundaries: list[tuple[str, float]] = []
-    for row in _run_insights_query(query_string, start_time, before):
+    for row in _run_insights_query(query_string, start_time, before, log_group):
         fields = {field["field"]: field["value"] for field in row}
         match = _START_REQUEST_ID_PATTERN.match(fields.get("@message", ""))
         if match is None:
@@ -668,16 +694,18 @@ def _run_boundaries(before: float, count: int, lookback_minutes: int) -> list[tu
     return boundaries
 
 
-def _fetch_runs_page(before: float | None, count: int) -> dict[str, Any]:
+def _fetch_runs_page(log_group: str, before: float | None, count: int) -> dict[str, Any]:
     window_end = before if before is not None else time.time()
-    boundaries = _run_boundaries(window_end, count, RUN_LOOKBACK_MINUTES)
+    boundaries = _run_boundaries(log_group, window_end, count, RUN_LOOKBACK_MINUTES)
     if not boundaries:
         return {"runs": [], "next_cursor": None}
 
     window_start = min(epoch for _, epoch in boundaries)
     boundary_ids = {request_id for request_id, _ in boundaries}
     query_string = "fields @timestamp, @message | sort @timestamp asc"
-    raw_events = [_parse_log_event_row(row) for row in _run_insights_query(query_string, window_start, window_end)]
+    raw_events = [
+        _parse_log_event_row(row) for row in _run_insights_query(query_string, window_start, window_end, log_group)
+    ]
     events = [event for event in raw_events if event is not None]
 
     runs = [run for run in _group_log_runs(events) if run["id"] in boundary_ids]
@@ -686,7 +714,7 @@ def _fetch_runs_page(before: float | None, count: int) -> dict[str, Any]:
     return {"runs": runs, "next_cursor": next_cursor}
 
 
-def _search_log_lines(pattern: str, before: float | None, limit: int) -> dict[str, Any]:
+def _search_log_lines(log_group: str, pattern: str, before: float | None, limit: int) -> dict[str, Any]:
     """Insights `like "literal"` (a plain substring match) rather than `like /regex/`,
     so user input is never interpreted as a regex - avoids both injection risk and
     surprising regex semantics for what's meant to be a plain-text search box."""
@@ -694,7 +722,7 @@ def _search_log_lines(pattern: str, before: float | None, limit: int) -> dict[st
     query_string = f'fields @timestamp, @message | filter @message like "{escaped}" | sort @timestamp desc | limit {limit}'
     end_time = before if before is not None else time.time()
     start_time = end_time - SEARCH_LOOKBACK_MINUTES * 60
-    events = [_parse_log_event_row(row) for row in _run_insights_query(query_string, start_time, end_time)]
+    events = [_parse_log_event_row(row) for row in _run_insights_query(query_string, start_time, end_time, log_group)]
     events = [event for event in events if event is not None]
     oldest_epoch = min((datetime.fromisoformat(e["timestamp"]).timestamp() for e in events), default=None)
     next_cursor = (oldest_epoch - 1) if len(events) == limit and oldest_epoch is not None else None
@@ -715,12 +743,12 @@ def _metric_query(
     }
 
 
-def _last_invocation_time(hours: int = 1) -> str | None:
+def _last_invocation_time(log_group: str = WATCH_LOG_GROUP, hours: int = 1) -> str | None:
     """Exact last-invocation timestamp from logs, not a CloudWatch metric bucket
     start (which can be up to one period-width earlier than the real event)."""
     start_time_ms = int((time.time() - hours * 3600) * 1000)
     response = logs_client.filter_log_events(
-        logGroupName=WATCH_LOG_GROUP,
+        logGroupName=log_group,
         startTime=start_time_ms,
         filterPattern="REPORT RequestId",
         interleaved=True,
@@ -732,7 +760,7 @@ def _last_invocation_time(hours: int = 1) -> str | None:
     return datetime.fromtimestamp(latest_ms / 1000, tz=timezone.utc).isoformat()
 
 
-def _duration_series(minutes: int) -> list[dict[str, Any]]:
+def _duration_series(minutes: int, function_name: str = WATCH_FUNCTION_NAME) -> list[dict[str, Any]]:
     """Per-invocation Duration - period scales with the selected window (see
     _metric_period_seconds) rather than a fixed 300s, so a 5-minute window
     still gets real points and a week-long window doesn't balloon into
@@ -741,7 +769,7 @@ def _duration_series(minutes: int) -> list[dict[str, Any]]:
     start_time = end_time - minutes * 60
     period = _metric_period_seconds(int(end_time - start_time))
     response = cloudwatch_client.get_metric_data(
-        MetricDataQueries=[_metric_query("duration_series", period, "AWS/Lambda", "Duration", "Average", WATCH_FUNCTION_NAME)],
+        MetricDataQueries=[_metric_query("duration_series", period, "AWS/Lambda", "Duration", "Average", function_name)],
         StartTime=start_time,
         EndTime=end_time,
         ScanBy="TimestampAscending",
@@ -751,6 +779,37 @@ def _duration_series(minutes: int) -> list[dict[str, Any]]:
         {"timestamp": timestamp.isoformat(), "value": round(value, 2)}
         for timestamp, value in zip(result["Timestamps"], result["Values"])
     ]
+
+
+def _report_line_stats(log_group: str, start_time: float, end_time: float) -> dict[str, Any]:
+    """Cold-start rate, memory headroom, and p95 duration - none of these are exposed
+    by CloudWatch's Lambda metrics (GetMetricData has no MemoryUtilization/cold-start
+    metric), but every invocation's own REPORT line already carries them, so one
+    Insights query with `parse`+`stats` pulls them out server-side instead of hauling
+    every raw REPORT line back to Python."""
+    query_string = (
+        "fields @message"
+        " | filter @message like /^REPORT RequestId/"
+        r" | parse @message /Duration: (?<duration_ms>[\d.]+) ms/"
+        r" | parse @message /Memory Size: (?<memory_size_mb>\d+) MB/"
+        r" | parse @message /Max Memory Used: (?<memory_used_mb>\d+) MB/"
+        r" | parse @message /Init Duration: (?<init_duration_ms>[\d.]+) ms/"
+        " | stats count() as total_count, count(init_duration_ms) as cold_start_count,"
+        " avg(memory_used_mb) as avg_memory_used_mb, max(memory_size_mb) as configured_memory_mb,"
+        " pct(duration_ms, 95) as p95_duration_ms"
+    )
+    rows = _run_insights_query(query_string, start_time, end_time, log_group)
+    if not rows:
+        return {"cold_start_rate": None, "avg_memory_used_mb": None, "memory_size_mb": None, "p95_duration_ms": None}
+    fields = {field["field"]: field["value"] for field in rows[0]}
+    total_count = int(float(fields.get("total_count", 0)))
+    cold_start_count = int(float(fields.get("cold_start_count", 0)))
+    return {
+        "cold_start_rate": round(cold_start_count / total_count, 4) if total_count else None,
+        "avg_memory_used_mb": round(float(fields["avg_memory_used_mb"]), 1) if fields.get("avg_memory_used_mb") else None,
+        "memory_size_mb": round(float(fields["configured_memory_mb"])) if fields.get("configured_memory_mb") else None,
+        "p95_duration_ms": round(float(fields["p95_duration_ms"]), 1) if fields.get("p95_duration_ms") else None,
+    }
 
 
 LOG_QUERY_POLL_INTERVAL_SECONDS = 0.5
@@ -802,12 +861,14 @@ def _insights_bin_expression(window_seconds: int) -> str:
     return _BIN_SECONDS_TO_EXPRESSION[_insights_bin_seconds(window_seconds)]
 
 
-def _run_insights_query(query_string: str, start_time: float, end_time: float) -> list[list[dict[str, str]]]:
+def _run_insights_query(
+    query_string: str, start_time: float, end_time: float, log_group: str = WATCH_LOG_GROUP
+) -> list[list[dict[str, str]]]:
     """Runs a CloudWatch Logs Insights query to completion (or gives up after
     LOG_QUERY_MAX_POLLS) and returns its raw result rows - each row a list of
     {field, value} dicts, same shape boto3 returns from get_query_results."""
     query_id = logs_client.start_query(
-        logGroupName=WATCH_LOG_GROUP,
+        logGroupName=log_group,
         startTime=int(start_time),
         endTime=int(end_time),
         queryString=query_string,
@@ -829,7 +890,7 @@ def _parse_insights_timestamp(raw_timestamp: str) -> str | None:
         return None
 
 
-def _structured_log_series(event_name: str, minutes: int) -> list[dict[str, Any]]:
+def _structured_log_series(event_name: str, minutes: int, log_group: str = WATCH_LOG_GROUP) -> list[dict[str, Any]]:
     """Parses watch.py's `print(json.dumps({"event": event_name, ...}))` lines
     into per-run data points, via CloudWatch Logs Insights rather than
     FilterLogEvents - Insights is indexed and sorts server-side, where
@@ -847,7 +908,7 @@ def _structured_log_series(event_name: str, minutes: int) -> list[dict[str, Any]
     end_time = time.time()
     start_time = end_time - minutes * 60
     parsed: list[dict[str, Any]] = []
-    for row in _run_insights_query(query_string, start_time, end_time):
+    for row in _run_insights_query(query_string, start_time, end_time, log_group):
         fields = {field["field"]: field["value"] for field in row}
         try:
             payload = json.loads(fields.get("@message", ""))
@@ -985,9 +1046,9 @@ def _admin_activity(minutes: int) -> dict[str, Any]:
     return result
 
 
-def _invocation_metrics(start_time: float, end_time: float) -> dict[str, Any]:
-    """errors/avg_duration_ms are single stat-tile numbers for the whole selected
-    window, so their period is the window itself (one bucket) - period used to be
+def _invocation_metrics(start_time: float, end_time: float, function_name: str = WATCH_FUNCTION_NAME) -> dict[str, Any]:
+    """errors/avg_duration_ms/throttles are single stat-tile numbers for the whole
+    selected window, so their period is the window itself (one bucket) - period used to be
     hardcoded to 86400 (24h), which only happened to be correct because the window
     was always a hardcoded 24h too; it must track the actual window now that it's
     selectable, or a query_id's "latest" value would silently only reflect its last
@@ -998,9 +1059,10 @@ def _invocation_metrics(start_time: float, end_time: float) -> dict[str, Any]:
     whole_window_period = max(60, window_seconds)
     series_period = _metric_period_seconds(window_seconds)
     queries = [
-        _metric_query("invocations", series_period, "AWS/Lambda", "Invocations", "Sum", WATCH_FUNCTION_NAME),
-        _metric_query("errors", whole_window_period, "AWS/Lambda", "Errors", "Sum", WATCH_FUNCTION_NAME),
-        _metric_query("avg_duration_ms", whole_window_period, "AWS/Lambda", "Duration", "Average", WATCH_FUNCTION_NAME),
+        _metric_query("invocations", series_period, "AWS/Lambda", "Invocations", "Sum", function_name),
+        _metric_query("errors", whole_window_period, "AWS/Lambda", "Errors", "Sum", function_name),
+        _metric_query("avg_duration_ms", whole_window_period, "AWS/Lambda", "Duration", "Average", function_name),
+        _metric_query("throttles", whole_window_period, "AWS/Lambda", "Throttles", "Sum", function_name),
     ]
     response = cloudwatch_client.get_metric_data(
         MetricDataQueries=queries,
@@ -1019,14 +1081,101 @@ def _invocation_metrics(start_time: float, end_time: float) -> dict[str, Any]:
         "invocations": round(sum(invocation_values), 2),
         "errors": latest("errors"),
         "avg_duration_ms": latest("avg_duration_ms"),
+        "throttles": latest("throttles"),
     }
 
 
+def _source_health_summary() -> dict[str, int]:
+    """Reduces the existing source-health scan (list_source_health, already used by
+    /api/admin/source-health) into a healthy/unhealthy rollup, using the same
+    consecutive-failure threshold watch.py already alerts on - no new DynamoDB writes."""
+    rows = list_source_health()
+    unhealthy = sum(1 for row in rows if int(row.get("consecutive_failures", 0)) >= SOURCE_FAILURE_ALERT_THRESHOLD)
+    return {"healthy_count": len(rows) - unhealthy, "unhealthy_count": unhealthy}
+
+
+def _zyte_call_count(minutes: int) -> int:
+    """Zyte is billed per request - counted from watch.py's source_fetch events
+    (which already carry `kind` per source) rather than a separate cost-tracking
+    mechanism. A count() query, not full payload parsing - source_fetch fires once
+    per source per run, which is too high-volume to parse every row over a long window."""
+    query_string = (
+        'fields @message | filter @message like /"event":\\s*"source_fetch"/'
+        ' and @message like /"kind":\\s*"zyte"/ | stats count() as total'
+    )
+    end_time = time.time()
+    start_time = end_time - minutes * 60
+    rows = _run_insights_query(query_string, start_time, end_time, WATCH_LOG_GROUP)
+    if not rows:
+        return 0
+    fields = {field["field"]: field["value"] for field in rows[0]}
+    return int(float(fields.get("total", 0)))
+
+
+def _render_series(minutes: int) -> list[dict[str, Any]]:
+    """Buckets renderer's render_success/render_failure events, zero-filled the same
+    way _token_usage_series is. totalMs only exists on render_success events, so
+    count(total_ms) is a free success count - Insights' stats functions have no
+    general if()/case(), so this avoids needing a conditional aggregation."""
+    window_seconds = minutes * 60
+    bin_seconds = _insights_bin_seconds(window_seconds)
+    bin_expression = _BIN_SECONDS_TO_EXPRESSION[bin_seconds]
+    end_time = time.time()
+    start_time = end_time - window_seconds
+    query_string = (
+        "fields @timestamp, @message"
+        ' | filter @message like /"event":\\s*"render_success"/ or @message like /"event":\\s*"render_failure"/'
+        r' | parse @message /"totalMs":\s*(?<total_ms>\d+)/'
+        " | stats count() as total_count, count(total_ms) as success_count, avg(total_ms) as avg_total_ms"
+        f" by bin({bin_expression}) as bucket"
+        " | sort bucket asc"
+    )
+    by_timestamp: dict[str, dict[str, Any]] = {}
+    for row in _run_insights_query(query_string, start_time, end_time, RENDERER_LOG_GROUP):
+        fields = {field["field"]: field["value"] for field in row}
+        timestamp = _parse_insights_timestamp(fields.get("bucket", ""))
+        if timestamp is None:
+            continue
+        total_count = int(float(fields.get("total_count", 0)))
+        success_count = int(float(fields.get("success_count", 0)))
+        by_timestamp[timestamp] = {
+            "timestamp": timestamp,
+            "success_count": success_count,
+            "failure_count": total_count - success_count,
+            "avg_total_ms": round(float(fields["avg_total_ms"]), 1) if fields.get("avg_total_ms") else None,
+        }
+
+    bucket_epoch = int(start_time // bin_seconds) * bin_seconds
+    filled: list[dict[str, Any]] = []
+    while bucket_epoch <= end_time:
+        timestamp = datetime.fromtimestamp(bucket_epoch, tz=timezone.utc).isoformat()
+        filled.append(
+            by_timestamp.get(
+                timestamp, {"timestamp": timestamp, "success_count": 0, "failure_count": 0, "avg_total_ms": None}
+            )
+        )
+        bucket_epoch += bin_seconds
+    return filled
+
+
+def _auth_rejected_count(minutes: int) -> int:
+    """Login rate-limit rejections - _is_rate_limited/_record_failed_auth already
+    exist but were invisible until now; a simple count is enough to flag brute-forcing."""
+    query_string = 'fields @message | filter @message like /"event":\\s*"auth_rejected"/ | stats count() as total'
+    end_time = time.time()
+    start_time = end_time - minutes * 60
+    rows = _run_insights_query(query_string, start_time, end_time, DASHBOARD_LOG_GROUP)
+    if not rows:
+        return 0
+    fields = {field["field"]: field["value"] for field in rows[0]}
+    return int(float(fields.get("total", 0)))
+
+
 METRICS_CACHE_TTL_SECONDS = 20
-_metrics_cache: dict[int, tuple[float, dict[str, Any]]] = {}
+_metrics_cache: dict[tuple[int, str], tuple[float, dict[str, Any]]] = {}
 
 
-def _recent_metrics(minutes: int = 1440) -> dict[str, Any]:
+def _recent_metrics(minutes: int = 1440, lambda_key: str = DEFAULT_LAMBDA_KEY) -> dict[str, Any]:
     """Cached in-process for METRICS_CACHE_TTL_SECONDS, keyed by the selected
     window - the Metrics page polls this every 60s, and the underlying CloudWatch
     Logs Insights queries can each take several seconds against a growing log
@@ -1037,41 +1186,51 @@ def _recent_metrics(minutes: int = 1440) -> dict[str, Any]:
     is just falling back to today's latency.
     """
     now = time.time()
-    cached = _metrics_cache.get(minutes)
+    cache_key = (minutes, lambda_key)
+    cached = _metrics_cache.get(cache_key)
     if cached is not None and now - cached[0] < METRICS_CACHE_TTL_SECONDS:
         return cached[1]
 
     end_time = now
     start_time = end_time - minutes * 60
+    function_name = LAMBDA_FUNCTION_NAMES.get(lambda_key, WATCH_FUNCTION_NAME)
+    log_group = LOG_GROUPS_BY_LAMBDA.get(lambda_key, WATCH_LOG_GROUP)
 
     # Independent CloudWatch/Logs round-trips, dispatched concurrently rather than
     # one after another - filter_log_events scanning a noisy 24h log group for a
-    # term with no matches can alone take several seconds, and serializing six of
-    # these back to back is what was making the metrics page painfully slow to load.
-    with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
-        invocation_metrics_future = executor.submit(_invocation_metrics, start_time, end_time)
-        last_ran_future = executor.submit(_last_invocation_time)
-        duration_series_future = executor.submit(_duration_series, minutes)
-        throughput_future = executor.submit(_structured_log_series, "scan_summary", minutes)
-        backlog_future = executor.submit(_structured_log_series, "validator_backlog", minutes)
-        token_usage_future = executor.submit(_token_usage_series, minutes)
+    # term with no matches can alone take several seconds, and serializing these
+    # back to back is what was making the metrics page painfully slow to load.
+    with concurrent.futures.ThreadPoolExecutor(max_workers=9) as executor:
+        invocation_metrics_future = executor.submit(_invocation_metrics, start_time, end_time, function_name)
+        last_ran_future = executor.submit(_last_invocation_time, log_group)
+        duration_series_future = executor.submit(_duration_series, minutes, function_name)
+        report_stats_future = executor.submit(_report_line_stats, log_group, start_time, end_time)
+        source_health_future = executor.submit(_source_health_summary)
+        zyte_calls_future = executor.submit(_zyte_call_count, minutes)
 
-        invocation_metrics = invocation_metrics_future.result()
-        last_ran = last_ran_future.result()
-        duration_series = duration_series_future.result()
-        throughput_series = throughput_future.result()
-        backlog_series = backlog_future.result()
-        token_usage_series = token_usage_future.result()
+        # Only the selected lambda's own business-logic events make sense to chart -
+        # scan_summary/validator_backlog/token usage are watch-only, render outcomes
+        # are renderer-only, auth rejections are dashboard-only.
+        lambda_specific_futures: dict[str, concurrent.futures.Future[Any]] = {}
+        if lambda_key == "watch":
+            lambda_specific_futures["throughput_series"] = executor.submit(_structured_log_series, "scan_summary", minutes)
+            lambda_specific_futures["backlog_series"] = executor.submit(_structured_log_series, "validator_backlog", minutes)
+            lambda_specific_futures["token_usage_series"] = executor.submit(_token_usage_series, minutes)
+        elif lambda_key == "renderer":
+            lambda_specific_futures["render_series"] = executor.submit(_render_series, minutes)
+        elif lambda_key == "dashboard":
+            lambda_specific_futures["auth_rejected_count"] = executor.submit(_auth_rejected_count, minutes)
 
-    result = {
-        **invocation_metrics,
-        "last_ran": last_ran,
-        "duration_series": duration_series,
-        "throughput_series": throughput_series,
-        "backlog_series": backlog_series,
-        "token_usage_series": token_usage_series,
-    }
-    _metrics_cache[minutes] = (now, result)
+        result = {
+            **invocation_metrics_future.result(),
+            "last_ran": last_ran_future.result(),
+            "duration_series": duration_series_future.result(),
+            **report_stats_future.result(),
+            "source_health": source_health_future.result(),
+            "zyte_calls": zyte_calls_future.result(),
+            **{key: future.result() for key, future in lambda_specific_futures.items()},
+        }
+    _metrics_cache[cache_key] = (now, result)
     return result
 
 
