@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import concurrent.futures
 import json
 import os
 import sys
+import threading
 import time
 import unittest
 from unittest.mock import patch
@@ -15,6 +17,7 @@ from classifier import ClassificationResult
 from watch import (
     CLASSIFIER_HEALTH_KEY,
     LAMBDA_HEALTH_FUNCTION_NAMES,
+    LLM_CALL_CONCURRENCY,
     SOURCE_FAILURE_ALERT_THRESHOLD,
     _ashby_job_type_tag,
     _job_type_url,
@@ -23,7 +26,9 @@ from watch import (
     build_job_type_sources,
     check_lambda_health,
     fetch_all_listings,
+    main,
     passes_classifier,
+    process_user,
     resolve_listing_validity,
 )
 
@@ -372,6 +377,117 @@ class FetchAllListingsConcurrencyTests(unittest.TestCase):
 
         self.assertEqual(unhealthy, [])
         mock_mark.assert_not_called()
+
+
+class ProcessUserSharedClassifierExecutorTests(unittest.TestCase):
+    """process_user submits classification work onto a caller-supplied executor
+    instead of creating its own, so concurrent users share one LLM_CALL_CONCURRENCY-wide
+    pool instead of each getting their own (see main()'s USER_CONCURRENCY split)."""
+
+    def test_concurrent_users_never_exceed_the_shared_pool_size(self) -> None:
+        pool_size = 2
+        lock = threading.Lock()
+        state = {"current": 0, "max_seen": 0}
+
+        def fake_passes_classifier(*args: object, **kwargs: object) -> ClassificationResult:
+            with lock:
+                state["current"] += 1
+                state["max_seen"] = max(state["max_seen"], state["current"])
+            time.sleep(0.05)
+            with lock:
+                state["current"] -= 1
+            return ClassificationResult(fits=False, reason="test")
+
+        def run_user(tag: str, classifier_executor: concurrent.futures.Executor) -> tuple[int, int, int, bool]:
+            user = {"user_id": tag, "ntfy_topic": "topic"}
+            config = {"email_to": ["a@b.com"]}
+            listings = [_listing(f"{tag}-{i}") for i in range(3)]
+            return process_user(user, config, listings, {}, "u", "p", "key", "model", {}, classifier_executor)
+
+        # patch() mutates the shared watch module, not thread-local state, so every patch
+        # must be applied once here before the concurrent runs start - not inside run_user,
+        # which would race two threads patching/unpatching the same module attribute.
+        with (
+            patch("watch.build_sources", return_value=[_FakeSource("direct")]),
+            patch("watch.build_job_type_sources", return_value=[]),
+            patch("watch.load_seen_ids", return_value={"already-seen"}),
+            patch("watch.record_listings"),
+            patch("watch._resolve_resume_text", return_value=None),
+            patch("watch.passes_classifier", side_effect=fake_passes_classifier),
+        ):
+            with concurrent.futures.ThreadPoolExecutor(max_workers=pool_size) as classifier_executor:
+                with concurrent.futures.ThreadPoolExecutor(max_workers=2) as user_pool:
+                    futures = [user_pool.submit(run_user, tag, classifier_executor) for tag in ("a", "b")]
+                    results = [future.result() for future in futures]
+
+        self.assertLessEqual(state["max_seen"], pool_size)
+        self.assertEqual([result[0] for result in results], [3, 3])
+
+
+class MainUserLoopTests(unittest.TestCase):
+    """main() runs process_user for every active user concurrently, sharing one
+    classifier executor across them (see USER_CONCURRENCY/LLM_CALL_CONCURRENCY)."""
+
+    def _run_main_with(self, active_users: list[dict[str, object]], process_user_side_effect: object) -> tuple[int, dict[str, object]]:
+        with patch.dict(os.environ, {"SMTP_USER": "u", "SMTP_PASS": "p"}):
+            with (
+                patch("watch.get_llm_model", return_value="fake-model"),
+                patch("watch.list_active_users", return_value=active_users),
+                patch("watch.load_user_config", return_value={}),
+                patch("watch.build_company_catalog", return_value={}),
+                patch("watch.build_sources", return_value=[]),
+                patch("watch.build_job_type_sources", return_value=[]),
+                patch("watch.fetch_all_listings", return_value=([], [], 0)),
+                patch("watch.check_lambda_health", return_value=[]),
+                patch("watch.resolve_listing_validity", return_value={}),
+                patch("watch.process_user", side_effect=process_user_side_effect),
+                patch("builtins.print") as mock_print,
+            ):
+                exit_code = main()
+        printed = [call.args[0] for call in mock_print.call_args_list]
+        summary_line = next(line for line in printed if line.startswith('{"event": "scan_summary"'))
+        return exit_code, json.loads(summary_line)
+
+    def test_shares_one_classifier_executor_across_all_users(self) -> None:
+        seen_executors: list[object] = []
+
+        def fake_process_user(*args: object) -> tuple[int, int, int, bool]:
+            seen_executors.append(args[-1])
+            return (0, 0, 0, False)
+
+        users = [{"user_id": "a", "ntfy_topic": "t"}, {"user_id": "b", "ntfy_topic": "t"}]
+        self._run_main_with(users, fake_process_user)
+
+        self.assertEqual(len(seen_executors), 2)
+        self.assertIs(seen_executors[0], seen_executors[1])
+        self.assertEqual(seen_executors[0]._max_workers, LLM_CALL_CONCURRENCY)
+
+    def test_one_user_exception_does_not_block_others_or_crash_run(self) -> None:
+        def fake_process_user(user: dict[str, object], *args: object) -> tuple[int, int, int, bool]:
+            if user["user_id"] == "bad":
+                raise RuntimeError("boom")
+            return (1, 1, 0, False)
+
+        users = [{"user_id": "bad", "ntfy_topic": "t"}, {"user_id": "good", "ntfy_topic": "t"}]
+        exit_code, summary = self._run_main_with(users, fake_process_user)
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(summary["new"], 1)
+        self.assertEqual(summary["notified"], 1)
+
+    def test_aggregates_totals_across_users(self) -> None:
+        results_by_user = {"a": (2, 1, 1, False), "b": (3, 0, 3, True)}
+
+        def fake_process_user(user: dict[str, object], *args: object) -> tuple[int, int, int, bool]:
+            return results_by_user[str(user["user_id"])]
+
+        users = [{"user_id": "a", "ntfy_topic": "t"}, {"user_id": "b", "ntfy_topic": "t"}]
+        exit_code, summary = self._run_main_with(users, fake_process_user)
+
+        self.assertEqual(summary["new"], 5)
+        self.assertEqual(summary["notified"], 1)
+        self.assertEqual(summary["dismissed"], 4)
+        self.assertEqual(exit_code, 1)
 
 
 class ResolveListingValidityTests(unittest.TestCase):

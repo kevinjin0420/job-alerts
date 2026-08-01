@@ -56,10 +56,18 @@ JOB_TYPE_URL_FIELDS = {"intern": "intern_url", "newgrad": "newgrad_url", "fullti
 # Shared by zyte and render - both render a page via a real browser; the cooldown avoids hammering
 # the same page (real money for zyte, just courtesy for render, but the same interval works for both).
 RENDERED_PAGE_FETCH_INTERVAL_SECONDS = 4 * 60 * 60
-# I/O-bound OpenRouter calls (validator or classifier) - a thread pool cuts N sequential calls to N/32; safe to raise since a classifier failure now fails closed (see passes_classifier), not open.
+# I/O-bound OpenRouter calls (validator or classifier) - one pool shared across every
+# user's classification work for the whole run, so total concurrent OpenRouter requests
+# stays capped at 32 regardless of how many users run in parallel (see USER_CONCURRENCY);
+# raising this multiplies OpenRouter load directly, and it has rate-limited a whole batch
+# under high concurrency before (see passes_classifier's docstring).
 LLM_CALL_CONCURRENCY = 32
 # Unlike LLM_CALL_CONCURRENCY, each fetch hits a different company's domain - no shared endpoint to respect, so this can run high (sequential fetching wasted 47s+/run).
 FETCH_CONCURRENCY = 25
+# Users run concurrently too, but they mostly block waiting on the shared LLM_CALL_CONCURRENCY
+# pool plus do light DynamoDB/SMTP I/O - actual OpenRouter concurrency is bounded separately,
+# so this can be higher than LLM_CALL_CONCURRENCY without raising OpenRouter load.
+USER_CONCURRENCY = 20
 # ponytail: Zyte is billed per request, unlike every other source kind - gate it
 # to a 6h cadence here (at source-selection time, not inside ZyteSource itself)
 # rather than giving it its own CloudWatch schedule. This piggybacks on the
@@ -462,6 +470,7 @@ def process_user(
     openrouter_api_key: str | None,
     llm_model: str,
     listing_validity: dict[str, tuple[bool, str]],
+    classifier_executor: concurrent.futures.Executor,
 ) -> tuple[int, int, int, bool]:
     """Returns (new_count, notified_count, dismissed_count, had_notification_failure)."""
     user_id = str(user["user_id"])
@@ -507,24 +516,23 @@ def process_user(
     ]
     classifications: dict[str, ClassificationResult | None] = {}
     if listings_needing_classification:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=LLM_CALL_CONCURRENCY) as executor:
-            futures = {
-                executor.submit(
-                    passes_classifier,
-                    openrouter_api_key,
-                    llm_model,
-                    fit_prompt,
-                    listing,
-                    resume_text,
-                    user_id,
-                    smtp_user,
-                    smtp_pass,
-                ): listing
-                for listing in listings_needing_classification
-            }
-            for future in concurrent.futures.as_completed(futures):
-                listing = futures[future]
-                classifications[listing.unique_id] = future.result()
+        futures = {
+            classifier_executor.submit(
+                passes_classifier,
+                openrouter_api_key,
+                llm_model,
+                fit_prompt,
+                listing,
+                resume_text,
+                user_id,
+                smtp_user,
+                smtp_pass,
+            ): listing
+            for listing in listings_needing_classification
+        }
+        for future in concurrent.futures.as_completed(futures):
+            listing = futures[future]
+            classifications[listing.unique_id] = future.result()
 
     # Model name goes in the log line only (below), not the stored/displayed reason - the Listings page shows the raw LLM reason text as-is.
     for listing in new_listings:
@@ -604,16 +612,37 @@ def main() -> int:
 
     total_new = total_notified = total_dismissed = 0
     had_notification_failure = False
-    for user in active_users:
-        user_id = str(user["user_id"])
-        new_count, notified_count, dismissed_count, user_had_failure = process_user(
-            user, user_configs[user_id], all_listings, catalog, smtp_user, smtp_pass, openrouter_api_key,
-            llm_model, listing_validity,
-        )
-        total_new += new_count
-        total_notified += notified_count
-        total_dismissed += dismissed_count
-        had_notification_failure = had_notification_failure or user_had_failure
+    # One LLM_CALL_CONCURRENCY-wide pool shared across every user below, so running users
+    # concurrently doesn't multiply OpenRouter load - see LLM_CALL_CONCURRENCY's comment.
+    with concurrent.futures.ThreadPoolExecutor(max_workers=LLM_CALL_CONCURRENCY) as classifier_executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=USER_CONCURRENCY) as user_executor:
+            futures = {
+                user_executor.submit(
+                    process_user,
+                    user,
+                    user_configs[str(user["user_id"])],
+                    all_listings,
+                    catalog,
+                    smtp_user,
+                    smtp_pass,
+                    openrouter_api_key,
+                    llm_model,
+                    listing_validity,
+                    classifier_executor,
+                ): user
+                for user in active_users
+            }
+            for future in concurrent.futures.as_completed(futures):
+                user = futures[future]
+                try:
+                    new_count, notified_count, dismissed_count, user_had_failure = future.result()
+                except Exception as error:  # a single broken user must not block the rest or crash the run
+                    print(f"User {user['user_id']}: unexpected failure processing user: {error}", file=sys.stderr)
+                    continue
+                total_new += new_count
+                total_notified += notified_count
+                total_dismissed += dismissed_count
+                had_notification_failure = had_notification_failure or user_had_failure
 
     print(
         f"Scan complete: {len(active_users)} user(s), {total_new} new, {total_notified} notified, "
