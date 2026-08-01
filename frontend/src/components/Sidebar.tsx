@@ -41,7 +41,7 @@ export function Sidebar({ className = "", onClose }: { className?: string; onClo
       className={`w-52 shrink-0 border-r border-neutral-200 dark:border-neutral-800 p-3 bg-neutral-50 dark:bg-neutral-950 ${className}`}
     >
       <div className="flex items-center justify-between mb-8">
-        <div className="text-xs font-semibold tracking-widest uppercase">job-alerts</div>
+        <div className="text-xs font-semibold tracking-widest uppercase">job alerts</div>
         <div className="flex items-center gap-2">
           <a
             href="https://github.com/kevinjin0420/job-alerts"

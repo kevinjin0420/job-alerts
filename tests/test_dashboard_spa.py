@@ -77,6 +77,16 @@ class AssetServingTests(unittest.TestCase):
         self.assertEqual(response["statusCode"], 200)
         self.assertTrue(response["headers"]["content-type"].startswith("text/html"))
 
+    def test_root_public_file_is_served_with_its_real_content_type(self) -> None:
+        """favicon.svg must not fall through to the SPA shell like an unmatched route would."""
+        self.assertIn("/favicon.svg", app.SPA_ROOT_FILES, "build the frontend before running this test")
+
+        response = app.handler(_get("/favicon.svg"), None)
+        self.assertEqual(response["statusCode"], 200)
+        self.assertEqual(response["headers"]["content-type"], "image/svg+xml")
+        self.assertEqual(response["headers"]["cache-control"], "public, max-age=3600")
+        self.assertEqual(base64.b64decode(response["body"]), app.SPA_ROOT_FILES["/favicon.svg"])
+
 
 if __name__ == "__main__":
     unittest.main()

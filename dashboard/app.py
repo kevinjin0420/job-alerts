@@ -54,9 +54,7 @@ from users import (
     set_user_active,
 )
 
-# Deliberately not importing watch.py here - it pulls in every scraper module for two one-liners
-# that would otherwise inflate this Lambda's cold-start import graph. Keep in sync with watch.py's
-# get_target_companies/get_job_types if their config-field semantics ever change.
+# Inlined instead of importing watch.py, which would drag in every scraper module.
 DEFAULT_JOB_TYPES = ["intern"]
 
 
@@ -100,6 +98,12 @@ SPA_ASSETS: dict[str, bytes] = (
     if _DIST_DIR and (_DIST_DIR / "assets").is_dir()
     else {}
 )
+# Vite copies public/* here unhashed, unlike /assets/*, so these can't be cached immutably.
+SPA_ROOT_FILES: dict[str, bytes] = (
+    {f"/{f.name}": f.read_bytes() for f in _DIST_DIR.iterdir() if f.is_file() and f.name != "index.html"}
+    if _DIST_DIR
+    else {}
+)
 
 FAILURE_MARKERS = ("fail", "Fail", "FAIL", "Error", "ERROR", "Traceback")
 # These lines embed the classifier's free-text reasoning, which often contains "fail"/"Error" as ordinary words (e.g. "Fails multiple criteria") - not an actual failure.
@@ -113,6 +117,8 @@ def handler(event: dict[str, Any], _context: object) -> dict[str, Any]:
     if method == "GET" and path in SPA_ASSETS:
         # Vite content-hashes every asset filename, so a given URL is immutable.
         return _asset_response(SPA_ASSETS[path], path, "public, max-age=31536000, immutable")
+    if method == "GET" and path in SPA_ROOT_FILES:
+        return _asset_response(SPA_ROOT_FILES[path], path, "public, max-age=3600")
     if method == "GET" and not path.startswith("/api/"):
         # SPA fallback - the client-side router owns every non-API path. index.html
         # must not be cached or a deploy's new asset hashes are never picked up.

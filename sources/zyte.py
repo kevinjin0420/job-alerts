@@ -1,29 +1,15 @@
 from __future__ import annotations
 
 import base64
-import html
 import json
 import os
-import re
-import urllib.parse
 
-from .base import Listing, fetch_url, looks_like_job_posting_url
+from .base import Listing, fetch_url, parse_rendered_html_listings
 
 ZYTE_EXTRACT_URL = "https://api.zyte.com/v1/extract"
 REQUEST_TIMEOUT_SECONDS = 60
 # ponytail: lets lazy-loaded SPAs (e.g. Tesla) render before the snapshot, but only catches their first batch - raise if new postings are missed.
 RENDER_WAIT_SECONDS = 8
-ANCHOR_PATTERN = re.compile(r'<a\s+[^>]*href="([^"]+)"[^>]*>(.*?)</a>', re.IGNORECASE | re.DOTALL)
-HEADING_PATTERN = re.compile(r"<h[1-6][^>]*>(.*?)</h[1-6]>", re.IGNORECASE | re.DOTALL)
-TAG_PATTERN = re.compile(r"<[^>]+>")
-MIN_TITLE_LENGTH = 4
-
-
-def _extract_anchor_title(anchor_inner_html: str) -> str:
-    """Card-style SPAs (e.g. Meta) nest the title in a heading rather than as the anchor's direct text - prefer that when present."""
-    heading_match = HEADING_PATTERN.search(anchor_inner_html)
-    text = heading_match.group(1) if heading_match else anchor_inner_html
-    return " ".join(html.unescape(TAG_PATTERN.sub(" ", text)).split())
 
 
 class ZyteMisconfigured(RuntimeError):
@@ -59,26 +45,5 @@ class ZyteSource:
             timeout=REQUEST_TIMEOUT_SECONDS,
         )
         payload = json.loads(response_body)
-
         browser_html = payload.get("browserHtml", "")
-        matches: list[Listing] = []
-        seen_urls: set[str] = set()
-        for href, inner_html in ANCHOR_PATTERN.findall(browser_html):
-            title = _extract_anchor_title(inner_html)
-            if len(title) < MIN_TITLE_LENGTH:
-                continue
-            absolute_url = urllib.parse.urljoin(self._url, href)
-            if absolute_url in seen_urls or not looks_like_job_posting_url(absolute_url):
-                continue
-            seen_urls.add(absolute_url)
-            matches.append(
-                Listing(
-                    source=self.name,
-                    id=absolute_url,
-                    company_name=self._company_name,
-                    title=title,
-                    locations=[],
-                    url=absolute_url,
-                )
-            )
-        return matches
+        return parse_rendered_html_listings(browser_html, self._url, self._company_name, self.name)

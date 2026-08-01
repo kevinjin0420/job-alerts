@@ -1,0 +1,17 @@
+{
+  "name": "job-alerts-renderer",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Headless-Chromium Lambda: renders a URL's JS and returns the resulting HTML. No anti-bot/proxy rotation - see sources/zyte.py for the hard-target path.",
+  "main": "index.js",
+  "type": "module",
+  "engines": {
+    "node": ">=22.17.0"
+  },
+  "dependencies": {
+    "@sparticuz/chromium": "^149.0.0",
+    "playwright-core": "^1.62.1",
+    "playwright-extra": "^4.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2"
+  }
+}

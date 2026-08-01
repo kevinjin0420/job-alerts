@@ -4,7 +4,13 @@ import unittest
 import urllib.error
 from unittest.mock import patch
 
-from sources.base import MAX_FETCH_ATTEMPTS, fetch_url, looks_like_job_posting_url
+from sources.base import (
+    MAX_FETCH_ATTEMPTS,
+    _extract_anchor_title,
+    fetch_url,
+    looks_like_job_posting_url,
+    parse_rendered_html_listings,
+)
 
 
 def _http_error(code: int) -> urllib.error.HTTPError:
@@ -91,6 +97,56 @@ class LooksLikeJobPostingUrlTests(unittest.TestCase):
     def test_rejects_short_number(self) -> None:
         # Fewer than 4 digits shouldn't count - too likely to be a real word/date fragment.
         self.assertFalse(looks_like_job_posting_url("https://example.com/jobs/42"))
+
+
+class ExtractAnchorTitleTests(unittest.TestCase):
+    def test_flat_text_anchor(self) -> None:
+        # The shape rendered-page parsing originally supported, before card-style SPAs.
+        html = "Software Engineer Intern"
+        self.assertEqual(_extract_anchor_title(html), "Software Engineer Intern")
+
+    def test_nested_heading_anchor(self) -> None:
+        # Meta-style: title lives in a heading buried under divs/spans, location/tags as later siblings.
+        html = (
+            '<div><div><h3 class="x1motxo8">Research Scientist Intern, AI/ML</h3></div></div>'
+            '<div><span>Zurich, Switzerland</span><span>AI Research</span></div>'
+        )
+        self.assertEqual(_extract_anchor_title(html), "Research Scientist Intern, AI/ML")
+
+    def test_decodes_html_entities(self) -> None:
+        html = "<h3>FAIR - Language &amp; Multimodal Foundations</h3>"
+        self.assertEqual(_extract_anchor_title(html), "FAIR - Language & Multimodal Foundations")
+
+    def test_falls_back_to_full_text_without_heading(self) -> None:
+        html = "<span>Data Engineer</span> <span>Intern</span>"
+        self.assertEqual(_extract_anchor_title(html), "Data Engineer Intern")
+
+
+class ParseRenderedHtmlListingsTests(unittest.TestCase):
+    def test_parses_card_style_listings_and_dedupes(self) -> None:
+        rendered_html = (
+            '<a href="/profile/job_details/771948392580541">'
+            '<div><h3>Research Scientist Intern, AI/ML</h3></div>'
+            '<span>Zurich, Switzerland</span></a>'
+            # A repeat of the same href (e.g. a duplicate mobile/desktop card) must be deduped.
+            '<a href="/profile/job_details/771948392580541"><h3>Research Scientist Intern, AI/ML</h3></a>'
+            # Nav/footer-style link with no numeric id must be dropped.
+            '<a href="/about">About Meta</a>'
+        )
+
+        listings = parse_rendered_html_listings(
+            rendered_html, "https://www.metacareers.com/jobsearch/?roles[0]=Internship", "Meta", "zyte:Meta:intern"
+        )
+
+        self.assertEqual(len(listings), 1)
+        self.assertEqual(listings[0].title, "Research Scientist Intern, AI/ML")
+        self.assertEqual(listings[0].url, "https://www.metacareers.com/profile/job_details/771948392580541")
+        self.assertEqual(listings[0].source, "zyte:Meta:intern")
+
+    def test_short_titles_are_dropped(self) -> None:
+        rendered_html = '<a href="/jobs/771948392580541">Hi</a>'
+        listings = parse_rendered_html_listings(rendered_html, "https://example.com/careers", "Example", "render:Example:intern")
+        self.assertEqual(listings, [])
 
 
 if __name__ == "__main__":

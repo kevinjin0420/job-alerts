@@ -4,10 +4,12 @@ Watches for new internship postings at big tech companies and pushes an alert to
 
 The list of companies is limited and is curated. This is meant to be a instant notifier for high-value targets, not a general scraper. 
 
-Each user configures their own companies, job types, and fit criteria
+Each user configures their own companies, job types, and fit criteria. 
 
 An LLM classifier screens every listing against your criteria and optionally your resume before notifying you.
 
 Hosted on AWS using Lambda and DynamoDB, with control panel at [jobs.kevinjin.dev](https://jobs.kevinjin.dev).
+
+Feel free to open an issue for feature or company requests. 
 
 If you want in and know me well enough, ask me and I'll add you to the list.

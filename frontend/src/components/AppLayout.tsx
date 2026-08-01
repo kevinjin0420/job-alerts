@@ -60,7 +60,7 @@ export function AppLayout() {
               />
             </svg>
           </button>
-          <span className="text-xs font-semibold tracking-widest uppercase">job-alerts</span>
+          <span className="text-xs font-semibold tracking-widest uppercase">job alerts</span>
         </div>
 
         <main className="flex-1 min-w-0 p-4 sm:p-6 flex flex-col min-h-0 overflow-y-auto">

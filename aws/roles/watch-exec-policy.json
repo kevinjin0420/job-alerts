@@ -12,6 +12,12 @@
       "Effect": "Allow",
       "Action": ["dynamodb:Scan", "dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem", "dynamodb:Query"],
       "Resource": "arn:aws:dynamodb:*:863516093571:table/job-alerts-*"
+    },
+    {
+      "Sid": "InvokeRenderer",
+      "Effect": "Allow",
+      "Action": "lambda:InvokeFunction",
+      "Resource": "arn:aws:lambda:us-west-1:863516093571:function:job-alerts-renderer"
     }
   ]
 }

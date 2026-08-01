@@ -1,14 +1,20 @@
 from __future__ import annotations
 
+import html
 import re
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from typing import Protocol
 
 _JOB_ID_PATTERN = re.compile(r"[/-][A-Za-z]{0,3}\d{4,}/?(?:[?#].*)?$")
 INTERNSHIP_TITLE_PATTERN = re.compile(r"\bintern(s|ship)?\b", re.IGNORECASE)
+_ANCHOR_PATTERN = re.compile(r'<a\s+[^>]*href="([^"]+)"[^>]*>(.*?)</a>', re.IGNORECASE | re.DOTALL)
+_HEADING_PATTERN = re.compile(r"<h[1-6][^>]*>(.*?)</h[1-6]>", re.IGNORECASE | re.DOTALL)
+_TAG_PATTERN = re.compile(r"<[^>]+>")
+_MIN_TITLE_LENGTH = 4
 
 
 def looks_like_job_posting_url(url: str) -> bool:
@@ -32,6 +38,38 @@ class Listing:
 
     def format_locations(self) -> str:
         return ", ".join(self.locations) if self.locations else "Location not specified"
+
+
+def _extract_anchor_title(anchor_inner_html: str) -> str:
+    """Card-style SPAs (e.g. Meta) nest the title in a heading rather than as the anchor's direct text - prefer that when present."""
+    heading_match = _HEADING_PATTERN.search(anchor_inner_html)
+    text = heading_match.group(1) if heading_match else anchor_inner_html
+    return " ".join(html.unescape(_TAG_PATTERN.sub(" ", text)).split())
+
+
+def parse_rendered_html_listings(rendered_html: str, base_url: str, company_name: str, source_name: str) -> list[Listing]:
+    """Extracts job-posting anchors out of a rendered page (Zyte or the self-hosted renderer both return full post-JS HTML) - shared so both sources parse identically."""
+    matches: list[Listing] = []
+    seen_urls: set[str] = set()
+    for href, inner_html in _ANCHOR_PATTERN.findall(rendered_html):
+        title = _extract_anchor_title(inner_html)
+        if len(title) < _MIN_TITLE_LENGTH:
+            continue
+        absolute_url = urllib.parse.urljoin(base_url, href)
+        if absolute_url in seen_urls or not looks_like_job_posting_url(absolute_url):
+            continue
+        seen_urls.add(absolute_url)
+        matches.append(
+            Listing(
+                source=source_name,
+                id=absolute_url,
+                company_name=company_name,
+                title=title,
+                locations=[],
+                url=absolute_url,
+            )
+        )
+    return matches
 
 
 class Source(Protocol):

@@ -4,30 +4,7 @@ import json
 import unittest
 from unittest.mock import patch
 
-from sources.zyte import ZyteMisconfigured, ZyteSource, _extract_anchor_title
-
-
-class ExtractAnchorTitleTests(unittest.TestCase):
-    def test_flat_text_anchor(self) -> None:
-        # The shape ZyteSource originally supported, before card-style SPAs.
-        html = "Software Engineer Intern"
-        self.assertEqual(_extract_anchor_title(html), "Software Engineer Intern")
-
-    def test_nested_heading_anchor(self) -> None:
-        # Meta-style: title lives in a heading buried under divs/spans, location/tags as later siblings.
-        html = (
-            '<div><div><h3 class="x1motxo8">Research Scientist Intern, AI/ML</h3></div></div>'
-            '<div><span>Zurich, Switzerland</span><span>AI Research</span></div>'
-        )
-        self.assertEqual(_extract_anchor_title(html), "Research Scientist Intern, AI/ML")
-
-    def test_decodes_html_entities(self) -> None:
-        html = "<h3>FAIR - Language &amp; Multimodal Foundations</h3>"
-        self.assertEqual(_extract_anchor_title(html), "FAIR - Language & Multimodal Foundations")
-
-    def test_falls_back_to_full_text_without_heading(self) -> None:
-        html = "<span>Data Engineer</span> <span>Intern</span>"
-        self.assertEqual(_extract_anchor_title(html), "Data Engineer Intern")
+from sources.zyte import ZyteMisconfigured, ZyteSource
 
 
 class ZyteSourceFetchTests(unittest.TestCase):

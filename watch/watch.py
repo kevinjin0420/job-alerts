@@ -6,6 +6,7 @@ import json
 import os
 import sys
 import time
+from typing import Any
 
 from classifier import MAX_ATTEMPTS as CLASSIFIER_MAX_ATTEMPTS
 from classifier import ClassificationResult, ClassifierError, check_is_job_posting, is_good_fit
@@ -16,6 +17,7 @@ from sources.amazon import QUERY_BY_JOB_TYPE as AMAZON_QUERY_BY_JOB_TYPE
 from sources.amazon import AmazonJobsSource
 from sources.ashby import EMPLOYMENT_TYPE_BY_JOB_TYPE, AshbySource
 from sources.oracle import OracleSource
+from sources.render import RenderSource
 from sources.sitemap import SitemapSource
 from sources.workday import WorkdaySource
 from sources.zyte import ZyteSource
@@ -41,7 +43,9 @@ DEFAULT_JOB_TYPES = ["intern"]
 SOURCE_FAILURE_ALERT_THRESHOLD = 3
 CLASSIFIER_HEALTH_KEY = "classifier:openrouter"
 JOB_TYPE_URL_FIELDS = {"intern": "intern_url", "newgrad": "newgrad_url", "fulltime": "fulltime_url"}
-ZYTE_FETCH_INTERVAL_SECONDS = 4 * 60 * 60
+# Shared by zyte and render - both render a page via a real browser; the cooldown avoids hammering
+# the same page (real money for zyte, just courtesy for render, but the same interval works for both).
+RENDERED_PAGE_FETCH_INTERVAL_SECONDS = 4 * 60 * 60
 # I/O-bound OpenRouter calls - a thread pool cuts N sequential calls to N/32; safe to raise since a classifier failure now fails closed (see passes_classifier), not open.
 CLASSIFIER_CONCURRENCY = 32
 # Unlike CLASSIFIER_CONCURRENCY, each fetch hits a different company's domain - no shared endpoint to respect, so this can run high (sequential fetching wasted 47s+/run).
@@ -119,46 +123,31 @@ def _job_type_url(entry: dict[str, object], job_type: str) -> str | None:
     return str(specific_url) if specific_url else (str(entry["general_url"]) if entry.get("general_url") else None)
 
 
-def _zyte_job_type_tag(entry: dict[str, object], job_type: str) -> str:
-    """Canonical tag for this job_type's zyte source. Computed by scanning the full
-    JOB_TYPE_URL_FIELDS universe against the catalog entry (not against whatever
-    subset of job_types a particular caller happens to want), so it resolves the
-    same way whether called for the global shared fetch or for one user's own
-    filtering. Job types that resolve to the identical URL (e.g. a company's
-    "early-career-talent" page serving both interns and new grads) collapse into
-    one tag, so that page is fetched once and each listing gets one unique_id -
-    not one per job_type that happens to point at it."""
+def _url_job_type_tag(entry: dict[str, object], job_type: str) -> str:
+    """Job types sharing the identical resolved URL collapse into one tag, so they merge into a single fetch instead of scraping the same page once per job_type. Shared by zyte and render - both key a Source purely off the resolved URL."""
     target_url = _job_type_url(entry, job_type)
     matching = sorted(jt for jt in JOB_TYPE_URL_FIELDS if _job_type_url(entry, jt) == target_url)
     return "+".join(matching) if matching else job_type
 
 
 def _ashby_job_type_tag(job_type: str) -> str:
-    """Canonical tag for this job_type's ashby source. Ashby has no distinct "new
-    grad" employment type (see EMPLOYMENT_TYPE_BY_JOB_TYPE) - "newgrad" and
-    "fulltime" both filter for FullTime and would otherwise scrape the same board
-    and notify on the same postings twice. Computed from the fixed
-    EMPLOYMENT_TYPE_BY_JOB_TYPE mapping alone (not from a caller's requested
-    subset), so it resolves the same way for every caller."""
+    """Ashby has no distinct "new grad" type - "newgrad" and "fulltime" merge into one tag to avoid double-notifying the same postings."""
     wanted = EMPLOYMENT_TYPE_BY_JOB_TYPE.get(job_type, "FullTime")
     matching = sorted(jt for jt in JOB_TYPE_URL_FIELDS if EMPLOYMENT_TYPE_BY_JOB_TYPE.get(jt, "FullTime") == wanted)
     return "+".join(matching) if matching else job_type
 
 
 def build_job_type_sources(
-    pairs: set[tuple[str, str]], catalog: dict[str, dict[str, object]], *, enforce_zyte_cooldown: bool = True
+    pairs: set[tuple[str, str]], catalog: dict[str, dict[str, object]], *, enforce_fetch_cooldown: bool = True
 ) -> list[Source]:
     """Sources resolved per (company, job_type) from the catalog, rather than a flat spec string.
 
-    enforce_zyte_cooldown must be False when called just to read back a
+    enforce_fetch_cooldown must be False when called just to read back a
     source's .name for filtering (as process_user does) rather than to
     actually fetch() - otherwise the cooldown looks "too recent" right after
     the shared fetch succeeds, and silently drops listings it just paid for.
 
-    Zyte/Ashby job_types that resolve to the identical underlying fetch are
-    merged into one Source with a combined name tag (see _zyte_job_type_tag /
-    _ashby_job_type_tag) - seen_names dedupes the pairs loop down to one Source
-    per merged identity so it's fetched once, not once per job_type in the group.
+    Zyte/Ashby job_types resolving to the identical fetch merge into one Source (see _url_job_type_tag/_ashby_job_type_tag).
     """
     sources: list[Source] = []
     seen_names: set[str] = set()
@@ -177,20 +166,23 @@ def build_job_type_sources(
                 continue
             seen_names.add(source.name)
             sources.append(source)
-        elif kind == "zyte":
+        elif kind == "zyte" or kind == "renderer":
             url = _job_type_url(entry, job_type)
             if not url:
                 continue
-            tag = _zyte_job_type_tag(entry, job_type)
-            source = ZyteSource(str(entry["company_name"]), str(url), tag)
+            tag = _url_job_type_tag(entry, job_type)
+            if kind == "zyte":
+                source: Source = ZyteSource(str(entry["company_name"]), str(url), tag)
+            else:
+                source = RenderSource(str(entry["company_name"]), str(url), tag)
             if source.name in seen_names:
                 continue
             seen_names.add(source.name)
-            if not enforce_zyte_cooldown:
+            if not enforce_fetch_cooldown:
                 sources.append(source)
             else:
                 last_success = get_source_last_success(source.name)
-                if last_success is None or time.time() - last_success >= ZYTE_FETCH_INTERVAL_SECONDS:
+                if last_success is None or time.time() - last_success >= RENDERED_PAGE_FETCH_INTERVAL_SECONDS:
                     sources.append(source)
         elif kind == "workday":
             # board_token is "host:tenant:site" (e.g. "wd5:nvidia:NVIDIAExternalCareerSite").
@@ -406,7 +398,7 @@ def process_user(
     except ValueError as error:
         print(f"User {user_id}: invalid source configuration: {error}", file=sys.stderr)
         return 0, 0, 0, False
-    user_sources.extend(build_job_type_sources(resolve_job_type_pairs(config), catalog, enforce_zyte_cooldown=False))
+    user_sources.extend(build_job_type_sources(resolve_job_type_pairs(config), catalog, enforce_fetch_cooldown=False))
     user_source_names = {source.name for source in user_sources}
 
     user_listings = [
@@ -550,6 +542,12 @@ def main() -> int:
         "dismissed": total_dismissed,
     }))
     return 1 if had_notification_failure else 0
+
+
+def handler(event: dict[str, Any], context: Any) -> None:
+    exit_code = main()
+    if exit_code != 0:
+        raise RuntimeError(f"watch.main() exited with code {exit_code}")
 
 
 if __name__ == "__main__":

@@ -2,3 +2,4 @@ aws/.env
 **/__pycache__/
 frontend/node_modules/
 frontend/dist/
+renderer/node_modules/

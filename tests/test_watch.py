@@ -1,17 +1,21 @@
 from __future__ import annotations
 
+import os
+import sys
 import time
 import unittest
 from unittest.mock import patch
 
 from classifier import ClassificationResult, ClassifierError
 from sources.base import Listing
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "watch"))
 from watch import (
     CLASSIFIER_HEALTH_KEY,
     SOURCE_FAILURE_ALERT_THRESHOLD,
     _ashby_job_type_tag,
     _job_type_url,
-    _zyte_job_type_tag,
+    _url_job_type_tag,
     build_job_type_sources,
     fetch_all_listings,
     passes_classifier,
@@ -20,7 +24,7 @@ from watch import (
 
 
 class BuildJobTypeSourcesZyteCooldownTests(unittest.TestCase):
-    """Regression tests for build_job_type_sources' enforce_zyte_cooldown - see its docstring."""
+    """Regression tests for build_job_type_sources' enforce_fetch_cooldown - see its docstring."""
 
     def setUp(self) -> None:
         self.catalog = {
@@ -39,7 +43,7 @@ class BuildJobTypeSourcesZyteCooldownTests(unittest.TestCase):
 
     def test_cooldown_disabled_includes_source_regardless_of_recency(self) -> None:
         with patch("watch.get_source_last_success", return_value=time.time()) as mock_get:
-            sources = build_job_type_sources(self.pairs, self.catalog, enforce_zyte_cooldown=False)
+            sources = build_job_type_sources(self.pairs, self.catalog, enforce_fetch_cooldown=False)
         mock_get.assert_not_called()
         self.assertEqual(len(sources), 1)
         self.assertEqual(sources[0].name, "zyte:Meta:intern")
@@ -74,26 +78,24 @@ class JobTypeUrlFallbackTests(unittest.TestCase):
         self.assertEqual(_job_type_url(entry, "newgrad"), entry["general_url"])
 
 
-class ZyteJobTypeTagTests(unittest.TestCase):
+class UrlJobTypeTagTests(unittest.TestCase):
     def test_shared_url_merges_into_one_tag(self) -> None:
         # Roblox's real config: intern_url and newgrad_url point at the same page.
         entry = {"intern_url": "https://careers.roblox.com/jobs?groups=early-career-talent",
                   "newgrad_url": "https://careers.roblox.com/jobs?groups=early-career-talent"}
-        self.assertEqual(_zyte_job_type_tag(entry, "intern"), "intern+newgrad")
-        self.assertEqual(_zyte_job_type_tag(entry, "newgrad"), "intern+newgrad")
+        self.assertEqual(_url_job_type_tag(entry, "intern"), "intern+newgrad")
+        self.assertEqual(_url_job_type_tag(entry, "newgrad"), "intern+newgrad")
 
     def test_distinct_urls_stay_separate(self) -> None:
         entry = {"intern_url": "https://example.com/intern", "fulltime_url": "https://example.com/fulltime"}
-        self.assertEqual(_zyte_job_type_tag(entry, "intern"), "intern")
-        self.assertEqual(_zyte_job_type_tag(entry, "fulltime"), "fulltime")
+        self.assertEqual(_url_job_type_tag(entry, "intern"), "intern")
+        self.assertEqual(_url_job_type_tag(entry, "fulltime"), "fulltime")
 
     def test_tag_is_independent_of_which_job_types_a_caller_actually_wants(self) -> None:
-        """Whether a caller asks only for "intern" or only for "newgrad", the tag
-        must resolve identically - otherwise a user's own source-name filtering
-        would drift out of sync with the shared fetch's merged source name."""
+        """A caller asking for only "intern" or only "newgrad" must resolve the same tag."""
         entry = {"intern_url": "https://careers.roblox.com/jobs?groups=early-career-talent",
                   "newgrad_url": "https://careers.roblox.com/jobs?groups=early-career-talent"}
-        self.assertEqual(_zyte_job_type_tag(entry, "intern"), _zyte_job_type_tag(entry, "newgrad"))
+        self.assertEqual(_url_job_type_tag(entry, "intern"), _url_job_type_tag(entry, "newgrad"))
 
 
 class AshbyJobTypeTagTests(unittest.TestCase):
@@ -116,14 +118,12 @@ class BuildJobTypeSourcesDedupTests(unittest.TestCase):
             }
         }
         pairs = {("Roblox", "intern"), ("Roblox", "newgrad")}
-        sources = build_job_type_sources(pairs, catalog, enforce_zyte_cooldown=False)
+        sources = build_job_type_sources(pairs, catalog, enforce_fetch_cooldown=False)
         self.assertEqual(len(sources), 1)
         self.assertEqual(sources[0].name, "zyte:Roblox:intern+newgrad")
 
     def test_zyte_single_requested_job_type_still_resolves_merged_name(self) -> None:
-        """A user who only configured "newgrad" must still filter against the
-        same merged source name the shared fetch (which may include "intern" too,
-        requested by a different user) actually produced."""
+        """A user who only configured "newgrad" must still resolve the shared fetch's merged name."""
         catalog = {
             "roblox": {
                 "company_name": "Roblox",
@@ -132,8 +132,22 @@ class BuildJobTypeSourcesDedupTests(unittest.TestCase):
                 "newgrad_url": "https://careers.roblox.com/jobs?groups=early-career-talent",
             }
         }
-        sources = build_job_type_sources({("Roblox", "newgrad")}, catalog, enforce_zyte_cooldown=False)
+        sources = build_job_type_sources({("Roblox", "newgrad")}, catalog, enforce_fetch_cooldown=False)
         self.assertEqual(sources[0].name, "zyte:Roblox:intern+newgrad")
+
+    def test_render_shared_url_across_job_types_produces_one_source(self) -> None:
+        catalog = {
+            "roblox": {
+                "company_name": "Roblox",
+                "source_kind": "renderer",
+                "intern_url": "https://careers.roblox.com/jobs?groups=early-career-talent",
+                "newgrad_url": "https://careers.roblox.com/jobs?groups=early-career-talent",
+            }
+        }
+        pairs = {("Roblox", "intern"), ("Roblox", "newgrad")}
+        sources = build_job_type_sources(pairs, catalog, enforce_fetch_cooldown=False)
+        self.assertEqual(len(sources), 1)
+        self.assertEqual(sources[0].name, "renderer:Roblox:intern+newgrad")
 
     def test_ashby_newgrad_and_fulltime_produce_one_source(self) -> None:
         catalog = {"acme": {"company_name": "Acme", "source_kind": "ashby", "board_name": "acme"}}
