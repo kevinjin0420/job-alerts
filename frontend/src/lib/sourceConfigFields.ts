@@ -1,7 +1,6 @@
 import type { Company, SourceHealth } from "../api/types";
 
-/** Every per-company source names itself "{kind}:{company_name}:{job_type}" (see
- * sources/*.py); "community" is the exception, one shared source with no suffix. */
+/** Sources name themselves "{kind}:{company}:{job_type}"; "community" is the one exception. */
 export function companyHealthRows(company: Company, health: SourceHealth[]): SourceHealth[] {
   if (company.source_kind === "community") {
     return health.filter((source) => source.source_name === company.source_kind);
@@ -38,8 +37,7 @@ export function latestTimestamp(rows: SourceHealth[], field: "last_success_at" |
   return latest || null;
 }
 
-/** Intern/New grad/Full-time fall back to General URL when the company has no
- * distinct page, mirroring watch.py's _job_type_url. */
+/** Falls back to general_url, mirroring watch.py's _job_type_url. */
 export function sourceConfigFields(company: Company): Array<[string, string | undefined]> {
   const effective = (field: "intern_url" | "newgrad_url" | "fulltime_url") => company[field] || company.general_url;
   const urlFields: Array<[string, string | undefined]> = [

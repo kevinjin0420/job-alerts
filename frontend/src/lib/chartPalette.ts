@@ -23,8 +23,7 @@ const DARK: ChartPalette = {
   other: "#6b6a64",
 };
 
-/** Lives in TS rather than CSS custom properties: a canvas cannot resolve var(),
- * so the old dashboard read these back out with getComputedStyle anyway. */
+/** In TS not CSS vars: a canvas cannot resolve var(), so JS had to read them back anyway. */
 export function chartPalette(isDark: boolean): ChartPalette {
   return isDark ? DARK : LIGHT;
 }

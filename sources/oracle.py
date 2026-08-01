@@ -2,9 +2,8 @@ from __future__ import annotations
 
 import json
 import urllib.parse
-import urllib.request
 
-from .base import INTERNSHIP_TITLE_PATTERN, Listing
+from .base import INTERNSHIP_TITLE_PATTERN, Listing, fetch_url
 
 REQUISITIONS_URL = "https://eeho.fa.us2.oraclecloud.com/hcmRestApi/resources/latest/recruitingCEJobRequisitions"
 JOB_URL_TEMPLATE = "https://careers.oracle.com/jobs/#en/sites/jobsearch/job/{id}"
@@ -24,9 +23,13 @@ class OracleSource:
     def _fetch_page(self, page: int) -> list[dict[str, object]]:
         finder = f"findReqs;siteNumber=CX_1,limit={PAGE_SIZE},offset={page * PAGE_SIZE},keyword=intern"
         query = urllib.parse.urlencode({"onlyData": "true", "expand": "requisitionList", "finder": finder})
-        request = urllib.request.Request(f"{REQUISITIONS_URL}?{query}", headers={"User-Agent": "job-alerts-watcher"})
-        with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
-            payload = json.loads(response.read())
+        body = fetch_url(
+            self.name,
+            f"{REQUISITIONS_URL}?{query}",
+            headers={"User-Agent": "job-alerts-watcher"},
+            timeout=REQUEST_TIMEOUT_SECONDS,
+        )
+        payload = json.loads(body)
         items = payload.get("items", [])
         return items[0].get("requisitionList", []) if items else []
 

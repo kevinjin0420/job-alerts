@@ -16,8 +16,7 @@ export interface SeriesDefinition<T> {
   colorIndex: number;
 }
 
-/** Normalized shape everything below renders from, so the component never needs
- * an index signature on the caller's concrete point type. */
+/** Normalized so the component needs no index signature on the caller's point type. */
 interface PlottedRow {
   timestamp: string;
   values: number[];
@@ -65,8 +64,7 @@ export function TimeSeriesChart<T extends TimestampedPoint>({
   const { isDark } = useTheme();
   const palette = chartPalette(isDark);
 
-  // No matching log lines can genuinely mean zero activity rather than missing
-  // data (e.g. no classifier calls this window) - draw a flat zero line instead.
+  // Empty can mean genuinely zero activity rather than missing data.
   const rows =
     data.length === 0 && emptyMeansZero ? zeroFilledRows(series.length, windowMinutes) : toPlottedRows(data, series);
 

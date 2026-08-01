@@ -5,11 +5,9 @@ import html
 import json
 import os
 import re
-import time
 import urllib.parse
-import urllib.request
 
-from .base import Listing, looks_like_job_posting_url
+from .base import Listing, fetch_url, looks_like_job_posting_url
 
 ZYTE_EXTRACT_URL = "https://api.zyte.com/v1/extract"
 REQUEST_TIMEOUT_SECONDS = 60
@@ -53,17 +51,14 @@ class ZyteSource:
             }
         ).encode("utf-8")
         auth = base64.b64encode(f"{api_key}:".encode("utf-8")).decode("ascii")
-        request = urllib.request.Request(
+        response_body = fetch_url(
+            self.name,
             ZYTE_EXTRACT_URL,
             data=body,
-            method="POST",
             headers={"Content-Type": "application/json", "Authorization": f"Basic {auth}"},
+            timeout=REQUEST_TIMEOUT_SECONDS,
         )
-        started = time.monotonic()
-        with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
-            payload = json.loads(response.read())
-            elapsed_ms = round((time.monotonic() - started) * 1000)
-            print(f"[{self.name}] POST {ZYTE_EXTRACT_URL} for {self._url} -> {response.status} ({elapsed_ms}ms)")
+        payload = json.loads(response_body)
 
         browser_html = payload.get("browserHtml", "")
         matches: list[Listing] = []

@@ -53,6 +53,7 @@ from users import (
     save_user_profile,
     set_user_active,
 )
+from watch import get_job_types, get_target_companies
 
 WATCH_LOG_GROUP = "/aws/lambda/job-alerts-watch"
 WATCH_FUNCTION_NAME = "job-alerts-watch"
@@ -70,10 +71,7 @@ dynamodb_client = boto3.client("dynamodb")
 cognito_client = boto3.client("cognito-idp")
 lambda_client = boto3.client("lambda")
 
-# The built SPA, read once at cold start and served from memory - same "compute
-# once, serve free" pattern the old per-page HTML used. deploy_dashboard.sh
-# stages it next to app.py; the frontend/ path is the local checkout layout, so
-# importing this module outside Lambda (tests) still works.
+# Read once at cold start. Second path is the local checkout layout, so tests can import this.
 _DIST_DIR = next(
     (
         candidate
@@ -392,9 +390,7 @@ def _tokens_from_auth_result(auth_result: dict[str, Any]) -> dict[str, Any]:
 
 
 def _handle_refresh(body: dict[str, Any], source_ip: str) -> dict[str, Any]:
-    """Exchanges a refresh token for a fresh access token. The refresh token is
-    the credential here, so a failure counts against the same per-IP budget as a
-    failed password login rather than being unmetered."""
+    """Failures count against the per-IP budget, or this is an unmetered oracle for guessing tokens."""
     refresh_token = str(body.get("refresh_token", "")).strip()
     if not refresh_token:
         return _json_response(400, {"error": "refresh_token is required"})
@@ -416,6 +412,8 @@ def _handle_admin(method: str, path: str, event: dict[str, Any], admin_user_id: 
         users = list_all_users()
         for user in users:
             user.pop("api_key_hash", None)
+            config = load_user_config(str(user["user_id"]))
+            user["query_count"] = len(get_target_companies(config)) * len(get_job_types(config))
         return _json_response(200, {"users": users})
 
     if method == "POST" and path == "/api/admin/users":
@@ -919,9 +917,7 @@ def _recent_metrics(minutes: int = 1440) -> dict[str, Any]:
 
 
 def _asset_response(body: bytes, filename: str, cache_control: str) -> dict[str, Any]:
-    """Base64 for every asset regardless of type - HTTP APIs decode it before it
-    reaches the client, so one path covers text and any future binary asset
-    instead of silently corrupting whatever falls outside a text allowlist."""
+    """Base64 for everything: HTTP APIs decode it, so binary assets cannot silently corrupt."""
     content_type, _ = mimetypes.guess_type(filename)
     return {
         "statusCode": 200,

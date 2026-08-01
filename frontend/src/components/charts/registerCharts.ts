@@ -12,8 +12,7 @@ import {
 
 import { chartPalette } from "../../lib/chartPalette";
 
-/** Chart.js ships hover highlighting but no crosshair line - draw a hairline at
- * the active point's x on every redraw. interaction.mode "index" already finds it. */
+/** Chart.js has no crosshair; interaction.mode "index" already finds the active point. */
 const crosshairPlugin: Plugin = {
   id: "crosshair",
   afterDatasetsDraw(chart) {

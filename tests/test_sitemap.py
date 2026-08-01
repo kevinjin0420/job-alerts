@@ -14,28 +14,14 @@ SAMPLE_XML = """<?xml version="1.0" encoding="UTF-8"?>
 """
 
 
-def _mock_response(body: str) -> object:
-    payload = body.encode("utf-8")
-
-    class _Response:
-        status = 200
-
-        def read(self) -> bytes:
-            return payload
-
-        def __enter__(self) -> "_Response":
-            return self
-
-        def __exit__(self, *args: object) -> None:
-            return None
-
-    return _Response()
+def _mock_response(body: str) -> bytes:
+    return body.encode("utf-8")
 
 
 class SitemapSourceFetchTests(unittest.TestCase):
     def test_filters_to_internship_slugs_and_humanizes_title(self) -> None:
         source = SitemapSource("Example", "https://example.com/careers/sitemap.xml")
-        with patch("sources.sitemap.urllib.request.urlopen", return_value=_mock_response(SAMPLE_XML)):
+        with patch("sources.sitemap.fetch_url", return_value=_mock_response(SAMPLE_XML)):
             listings = source.fetch()
 
         # "internal-tools" must not false-positive-match "intern" (INTERNSHIP_TITLE_PATTERN uses a word boundary).

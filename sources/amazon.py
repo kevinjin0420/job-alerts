@@ -2,9 +2,8 @@ from __future__ import annotations
 
 import json
 import urllib.parse
-import urllib.request
 
-from .base import Listing
+from .base import Listing, fetch_url
 
 SEARCH_URL = "https://www.amazon.jobs/en/search.json"
 REQUEST_TIMEOUT_SECONDS = 30
@@ -32,9 +31,8 @@ class AmazonJobsSource:
             return []
 
         url = f"{SEARCH_URL}?base_query={urllib.parse.quote(query)}&result_limit={RESULT_LIMIT}&offset=0"
-        request = urllib.request.Request(url, headers={"User-Agent": "job-alerts-watcher"})
-        with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
-            payload = json.loads(response.read())
+        body = fetch_url(self.name, url, headers={"User-Agent": "job-alerts-watcher"}, timeout=REQUEST_TIMEOUT_SECONDS)
+        payload = json.loads(body)
 
         matches: list[Listing] = []
         for job in payload.get("jobs", []):

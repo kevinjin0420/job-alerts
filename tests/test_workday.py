@@ -7,22 +7,8 @@ from unittest.mock import patch
 from sources.workday import WorkdaySource
 
 
-def _mock_response(body: dict[str, object]) -> object:
-    payload = json.dumps(body).encode("utf-8")
-
-    class _Response:
-        status = 200
-
-        def read(self) -> bytes:
-            return payload
-
-        def __enter__(self) -> "_Response":
-            return self
-
-        def __exit__(self, *args: object) -> None:
-            return None
-
-    return _Response()
+def _mock_response(body: dict[str, object]) -> bytes:
+    return json.dumps(body).encode("utf-8")
 
 
 FACETS_RESPONSE = {
@@ -63,7 +49,7 @@ class WorkdaySourceFetchTests(unittest.TestCase):
         }
         source = WorkdaySource("Example", "wd5", "example", "ExampleCareerSite", "intern")
         with patch(
-            "sources.workday.urllib.request.urlopen",
+            "sources.workday.fetch_url",
             side_effect=[_mock_response(FACETS_RESPONSE), _mock_response(page_response)],
         ):
             listings = source.fetch()
@@ -80,12 +66,12 @@ class WorkdaySourceFetchTests(unittest.TestCase):
         page_response = {"total": 0, "jobPostings": []}
         source = WorkdaySource("Example", "wd5", "example", "ExampleCareerSite", "newgrad")
         with patch(
-            "sources.workday.urllib.request.urlopen",
+            "sources.workday.fetch_url",
             side_effect=[_mock_response(FACETS_RESPONSE), _mock_response(page_response)],
-        ) as mock_urlopen:
+        ) as mock_fetch_url:
             source.fetch()
 
-        second_call_body = json.loads(mock_urlopen.call_args_list[1].args[0].data)
+        second_call_body = json.loads(mock_fetch_url.call_args_list[1].kwargs["data"])
         self.assertEqual(second_call_body["appliedFacets"], {"workerSubType": ["newgrad-id"]})
 
     def test_paginates_past_first_page(self) -> None:
@@ -116,7 +102,7 @@ class WorkdaySourceFetchTests(unittest.TestCase):
         }
         source = WorkdaySource("Example", "wd5", "example", "ExampleCareerSite", "intern")
         with patch(
-            "sources.workday.urllib.request.urlopen",
+            "sources.workday.fetch_url",
             side_effect=[_mock_response(FACETS_RESPONSE), _mock_response(full_page), _mock_response(last_page)],
         ):
             listings = source.fetch()
@@ -142,12 +128,12 @@ class WorkdaySourceFetchTests(unittest.TestCase):
         page_response = {"total": 0, "jobPostings": []}
         source = WorkdaySource("Example", "wd5", "example", "ExampleCareerSite", "fulltime")
         with patch(
-            "sources.workday.urllib.request.urlopen",
+            "sources.workday.fetch_url",
             side_effect=[_mock_response(bare_regular_facets), _mock_response(page_response)],
-        ) as mock_urlopen:
+        ) as mock_fetch_url:
             source.fetch()
 
-        second_call_body = json.loads(mock_urlopen.call_args_list[1].args[0].data)
+        second_call_body = json.loads(mock_fetch_url.call_args_list[1].kwargs["data"])
         self.assertEqual(second_call_body["appliedFacets"], {"workerSubType": ["bare-regular-id"]})
 
     def test_intern_falls_back_to_job_family_group_when_no_worker_sub_type_facet(self) -> None:
@@ -169,12 +155,12 @@ class WorkdaySourceFetchTests(unittest.TestCase):
         page_response = {"total": 0, "jobPostings": []}
         source = WorkdaySource("Example", "wd5", "example", "ExampleCareerSite", "intern")
         with patch(
-            "sources.workday.urllib.request.urlopen",
+            "sources.workday.fetch_url",
             side_effect=[_mock_response(university_only_facets), _mock_response(page_response)],
-        ) as mock_urlopen:
+        ) as mock_fetch_url:
             source.fetch()
 
-        second_call_body = json.loads(mock_urlopen.call_args_list[1].args[0].data)
+        second_call_body = json.loads(mock_fetch_url.call_args_list[1].kwargs["data"])
         self.assertEqual(second_call_body["appliedFacets"], {"jobFamilyGroup": ["university-id"]})
 
     def test_returns_empty_when_no_matching_worker_sub_type(self) -> None:
@@ -190,7 +176,7 @@ class WorkdaySourceFetchTests(unittest.TestCase):
                 }
             ],
         }
-        with patch("sources.workday.urllib.request.urlopen", return_value=_mock_response(no_intern_facets)):
+        with patch("sources.workday.fetch_url", return_value=_mock_response(no_intern_facets)):
             listings = source.fetch()
 
         self.assertEqual(listings, [])

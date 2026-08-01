@@ -22,8 +22,7 @@ export class ApiError extends Error {
   }
 }
 
-/** Set by AuthProvider so an unrecoverable 401 clears the session, without
- * threading context through every call site. */
+/** Set by AuthProvider so a 401 clears the session without threading context through call sites. */
 let unauthorizedHandler: (() => void) | null = null;
 
 export function setUnauthorizedHandler(handler: (() => void) | null): void {
@@ -85,8 +84,7 @@ async function performRefresh(): Promise<string | null> {
   }
 }
 
-/** Collapses parallel refreshes into one call - every query firing at once on a
- * stale token would otherwise each POST /api/refresh. */
+/** One in-flight refresh, or every query on a stale token POSTs /api/refresh separately. */
 function refreshAccessToken(): Promise<string | null> {
   refreshInFlight ??= performRefresh().finally(() => {
     refreshInFlight = null;
@@ -149,8 +147,7 @@ async function sendRequest<T>(path: string, options: RequestOptions, allowRefres
   });
 
   if (response.status === 401 && !skipAuth) {
-    // The server rejected this token outright, so a refresh is the only thing
-    // that can save the session - one attempt, then sign out for real.
+    // Token is definitively rejected, so refresh is the only save - one attempt, then sign out.
     if (allowRefreshRetry && (await refreshAccessToken()) !== null) {
       return sendRequest<T>(path, options, false);
     }

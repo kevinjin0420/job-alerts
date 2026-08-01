@@ -13,16 +13,7 @@ const START_PATTERN = /^START RequestId: (\S+)/;
 const END_PATTERN = /^END RequestId: (\S+)/;
 const REPORT_PATTERN = /^REPORT RequestId: (\S+)\s+Duration: ([\d.]+) ms/;
 
-/** Lambda only tags the platform START/END/REPORT lines with a RequestId, not the
- * print() lines between them, so untagged lines are attributed to whichever run
- * is currently open. Tagged lines go to the run they name: REPORT always arrives
- * *after* END, so resolving it through the open stack would attribute every
- * duration to a phantom run instead of the invocation it belongs to.
- *
- * A genuinely overlapping invocation (rare - a manual scan overlapping the
- * schedule) still misattributes its untagged lines; not solved here.
- *
- * Takes events newest-first (as /api/logs returns them) and returns runs newest-first. */
+/** REPORT arrives after END pops the stack, so tagged lines resolve by RequestId. Newest-first in and out. */
 export function groupLogRuns(events: LogEvent[]): LogRun[] {
   const ascending = [...events].reverse();
   const runs: LogRun[] = [];
@@ -30,6 +21,7 @@ export function groupLogRuns(events: LogEvent[]): LogRun[] {
   const openStack: LogRun[] = [];
   let unknownRun: LogRun | null = null;
 
+  // ponytail: untagged lines follow the open stack, so overlapping invocations misattribute theirs.
   const currentRun = (): LogRun => {
     const open = openStack[openStack.length - 1];
     if (open !== undefined) {

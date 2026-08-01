@@ -7,22 +7,8 @@ from unittest.mock import patch
 from sources.oracle import OracleSource
 
 
-def _mock_response(requisitions: list[dict[str, object]]) -> object:
-    payload = json.dumps({"items": [{"requisitionList": requisitions}]}).encode("utf-8")
-
-    class _Response:
-        status = 200
-
-        def read(self) -> bytes:
-            return payload
-
-        def __enter__(self) -> "_Response":
-            return self
-
-        def __exit__(self, *args: object) -> None:
-            return None
-
-    return _Response()
+def _mock_response(requisitions: list[dict[str, object]]) -> bytes:
+    return json.dumps({"items": [{"requisitionList": requisitions}]}).encode("utf-8")
 
 
 class OracleSourceFetchTests(unittest.TestCase):
@@ -33,7 +19,7 @@ class OracleSourceFetchTests(unittest.TestCase):
             {"Id": "3", "Title": "Marketing Internship"},
         ]
         source = OracleSource("Oracle")
-        with patch("sources.oracle.urllib.request.urlopen", side_effect=[_mock_response(requisitions), _mock_response([])]):
+        with patch("sources.oracle.fetch_url", side_effect=[_mock_response(requisitions), _mock_response([])]):
             listings = source.fetch()
 
         self.assertEqual({listing.id for listing in listings}, {"1", "3"})
@@ -45,7 +31,7 @@ class OracleSourceFetchTests(unittest.TestCase):
     def test_dedupes_across_pages(self) -> None:
         page = [{"Id": "1", "Title": "Software Intern", "PrimaryLocation": "Remote"}]
         source = OracleSource("Oracle")
-        with patch("sources.oracle.urllib.request.urlopen", side_effect=[_mock_response(page), _mock_response(page), _mock_response([])]):
+        with patch("sources.oracle.fetch_url", side_effect=[_mock_response(page), _mock_response(page), _mock_response([])]):
             listings = source.fetch()
 
         # Real pagination stops once a page returns nothing, but a duplicate id

@@ -1,7 +1,6 @@
 import { useState, type ReactNode } from "react";
 
-// min-w-0: a grid item defaults to min-width:auto, so without it the canvas's
-// intrinsic width pushes the card past the viewport instead of shrinking to fit.
+// min-w-0: grid items default to min-width:auto, letting the canvas push the card off-viewport.
 const FIGURE_CLASS =
   "min-w-0 border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 px-4 py-4";
 

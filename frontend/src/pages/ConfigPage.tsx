@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useConfigOptions, useSaveConfig, useTestClassifier, useUserConfig } from "../api/hooks";
 import type { PromptPreview } from "../api/types";
@@ -100,13 +100,27 @@ export function ConfigPage() {
     setSelectedJobTypes(new Set((loadedConfig.job_types ?? ["intern"]).map((name) => name.toLowerCase())));
   }, [loadedConfig]);
 
-  useEffect(() => {
-    const textarea = promptRef.current;
-    if (textarea) {
-      textarea.style.height = "auto";
-      textarea.style.height = `${textarea.scrollHeight}px`;
+  const autoResize = useCallback((textarea: HTMLTextAreaElement | null) => {
+    if (textarea === null) {
+      return;
     }
-  }, [fitPrompt, loadedConfig]);
+    textarea.style.height = "auto";
+    textarea.style.height = `${textarea.scrollHeight}px`;
+  }, []);
+
+  // Callback ref, not just an effect: config and options resolve independently, so
+  // the textarea can mount after fitPrompt is already set.
+  const attachPrompt = useCallback(
+    (textarea: HTMLTextAreaElement | null) => {
+      promptRef.current = textarea;
+      autoResize(textarea);
+    },
+    [autoResize],
+  );
+
+  useEffect(() => {
+    autoResize(promptRef.current);
+  }, [fitPrompt, autoResize]);
 
   const visibleCompanies = useMemo(() => {
     const query = companySearch.trim().toLowerCase();
@@ -140,7 +154,7 @@ export function ConfigPage() {
       return next;
     });
 
-  // Selections are tracked lowercased for case-insensitive matching, but the API stores the catalog's original casing.
+  // Selections are lowercased for matching; the API stores the catalog's casing.
   const selectedFrom = (all: string[], selected: Set<string>) =>
     all.filter((name) => selected.has(name.toLowerCase()));
 
@@ -188,7 +202,7 @@ export function ConfigPage() {
                 <>
                   <div className="whitespace-pre-wrap text-neutral-500 dark:text-neutral-500">{preview.before}</div>
                   <textarea
-                    ref={promptRef}
+                    ref={attachPrompt}
                     rows={1}
                     value={fitPrompt}
                     onChange={(event) => setFitPrompt(event.target.value)}

@@ -131,6 +131,7 @@ export interface AdminUser {
   active?: boolean;
   created_at?: number;
   onboarding_completed?: boolean;
+  query_count?: number;
 }
 
 export interface Company {

@@ -81,7 +81,7 @@ export function useConfigOptions(): UseQueryResult<ConfigOptions, Error> {
   });
 }
 
-/** The backend merges onto the stored item, so a partial patch is intentional here. */
+/** The backend merges onto the stored item, so a partial patch is intentional. */
 export function useSaveConfig(): UseMutationResult<void, Error, UserConfig> {
   const queryClient = useQueryClient();
   return useMutation({

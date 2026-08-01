@@ -4,9 +4,7 @@ interface State {
   error: Error | null;
 }
 
-/** In the old multi-page dashboard a broken page could not take down navigation.
- * In an SPA an uncaught render error blanks the whole app, so one boundary keeps
- * a failed route recoverable instead of leaving a white screen. */
+/** An uncaught render error blanks a whole SPA, unlike the old multi-page dashboard. */
 export class ErrorBoundary extends Component<{ children: ReactNode }, State> {
   override state: State = { error: null };
 

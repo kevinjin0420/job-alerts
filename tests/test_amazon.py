@@ -7,22 +7,8 @@ from unittest.mock import patch
 from sources.amazon import AmazonJobsSource
 
 
-def _mock_response(body: dict[str, object]) -> object:
-    payload = json.dumps(body).encode("utf-8")
-
-    class _Response:
-        status = 200
-
-        def read(self) -> bytes:
-            return payload
-
-        def __enter__(self) -> "_Response":
-            return self
-
-        def __exit__(self, *args: object) -> None:
-            return None
-
-    return _Response()
+def _mock_response(body: dict[str, object]) -> bytes:
+    return json.dumps(body).encode("utf-8")
 
 
 class AmazonJobsSourceFetchTests(unittest.TestCase):
@@ -40,7 +26,7 @@ class AmazonJobsSourceFetchTests(unittest.TestCase):
             ]
         }
         source = AmazonJobsSource("Amazon", "intern")
-        with patch("sources.amazon.urllib.request.urlopen", return_value=_mock_response(payload)):
+        with patch("sources.amazon.fetch_url", return_value=_mock_response(payload)):
             listings = source.fetch()
 
         self.assertEqual(len(listings), 1)
@@ -50,10 +36,10 @@ class AmazonJobsSourceFetchTests(unittest.TestCase):
 
     def test_returns_empty_for_unsupported_job_type(self) -> None:
         source = AmazonJobsSource("Amazon", "fulltime")
-        with patch("sources.amazon.urllib.request.urlopen") as mock_urlopen:
+        with patch("sources.amazon.fetch_url") as mock_fetch_url:
             listings = source.fetch()
 
-        mock_urlopen.assert_not_called()
+        mock_fetch_url.assert_not_called()
         self.assertEqual(listings, [])
 
     def test_name_includes_company_name(self) -> None:

@@ -88,7 +88,7 @@ export function MetricsPage() {
 
   return (
     <>
-      <PageHeader title={`Metrics · last ${range.label}`}>
+      <PageHeader title="Metrics">
         <RangeSelect value={range.value} onChange={setRangeValue} />
         <RefreshButton onClick={refresh} />
       </PageHeader>

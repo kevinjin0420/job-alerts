@@ -3,12 +3,7 @@ import { Outlet, useLocation } from "react-router-dom";
 
 import { Sidebar } from "./Sidebar";
 
-/** h-dvh (not h-screen - 100vh counts the collapsing mobile URL bar) plus
- * overflow-hidden makes <main> the single scroll container, so pages that fill
- * the viewport can use flex-1/min-h-0 and pages that just grow still scroll.
- *
- * Below md the 208px sidebar would eat half a phone screen, so it becomes a
- * drawer behind a top bar. */
+/** dvh not vh: 100vh counts the collapsing mobile URL bar. overflow-hidden makes <main> the only scroller. */
 export function AppLayout() {
   const [isNavOpen, setIsNavOpen] = useState(false);
   const location = useLocation();
@@ -47,9 +42,7 @@ export function AppLayout() {
         </div>
       )}
 
-      {/* min-w-0: a flex item defaults to min-width:auto, so without this the
-          min-w on the wide admin tables forces the whole page wider than the
-          viewport instead of scrolling inside its own container. */}
+      {/* min-w-0: flex items default to min-width:auto, letting wide tables stretch the page. */}
       <div className="flex-1 min-w-0 flex flex-col min-h-0">
         <div className="md:hidden flex items-center gap-3 border-b border-neutral-200 dark:border-neutral-800 px-4 py-3 shrink-0">
           <button

@@ -30,22 +30,6 @@ class ExtractAnchorTitleTests(unittest.TestCase):
         self.assertEqual(_extract_anchor_title(html), "Data Engineer Intern")
 
 
-def _mock_response(body: bytes) -> object:
-    class _Response:
-        status = 200
-
-        def read(self) -> bytes:
-            return body
-
-        def __enter__(self) -> "_Response":
-            return self
-
-        def __exit__(self, *args: object) -> None:
-            return None
-
-    return _Response()
-
-
 class ZyteSourceFetchTests(unittest.TestCase):
     def test_raises_when_api_key_missing(self) -> None:
         source = ZyteSource("Example", "https://example.com/careers", "intern")
@@ -67,7 +51,7 @@ class ZyteSourceFetchTests(unittest.TestCase):
 
         source = ZyteSource("Meta", "https://www.metacareers.com/jobsearch/?roles[0]=Internship", "intern")
         with patch.dict("os.environ", {"ZYTE_API_KEY": "fake-key"}):
-            with patch("sources.zyte.urllib.request.urlopen", return_value=_mock_response(payload)):
+            with patch("sources.zyte.fetch_url", return_value=payload):
                 listings = source.fetch()
 
         self.assertEqual(len(listings), 1)

@@ -45,9 +45,17 @@ RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
 RETRY_BACKOFF_BASE_SECONDS = 2
 
 
-def fetch_url(source_name: str, url: str, *, headers: dict[str, str] | None = None, timeout: int = 30) -> bytes:
-    """GETs a URL, logging status/timing. Retries with backoff on a transient status (429/5xx); a hard failure (403, 404, etc.) still propagates immediately."""
-    request = urllib.request.Request(url, headers=headers or {})
+def fetch_url(
+    source_name: str,
+    url: str,
+    *,
+    headers: dict[str, str] | None = None,
+    timeout: int = 30,
+    data: bytes | None = None,
+) -> bytes:
+    """GETs (or POSTs, when data is given - urllib implies POST from a non-None body) a URL, logging status/timing. Retries with backoff on a transient status (429/5xx); a hard failure (403, 404, etc.) still propagates immediately."""
+    request = urllib.request.Request(url, data=data, headers=headers or {})
+    method = request.get_method()
     for attempt in range(MAX_FETCH_ATTEMPTS):
         if attempt > 0:
             time.sleep(RETRY_BACKOFF_BASE_SECONDS * attempt)
@@ -56,7 +64,7 @@ def fetch_url(source_name: str, url: str, *, headers: dict[str, str] | None = No
             with urllib.request.urlopen(request, timeout=timeout) as response:
                 body = response.read()
                 elapsed_ms = round((time.monotonic() - started) * 1000)
-                print(f"[{source_name}] GET {url} -> {response.status} ({elapsed_ms}ms, {len(body)} bytes)")
+                print(f"[{source_name}] {method} {url} -> {response.status} ({elapsed_ms}ms, {len(body)} bytes)")
                 return body
         except urllib.error.HTTPError as error:
             elapsed_ms = round((time.monotonic() - started) * 1000)
@@ -64,7 +72,7 @@ def fetch_url(source_name: str, url: str, *, headers: dict[str, str] | None = No
             if error.code not in RETRYABLE_STATUS_CODES or is_last_attempt:
                 raise
             print(
-                f"[{source_name}] GET {url} -> {error.code} ({elapsed_ms}ms), "
+                f"[{source_name}] {method} {url} -> {error.code} ({elapsed_ms}ms), "
                 f"retrying (attempt {attempt + 1}/{MAX_FETCH_ATTEMPTS})"
             )
     raise AssertionError("unreachable - loop above always returns or raises")

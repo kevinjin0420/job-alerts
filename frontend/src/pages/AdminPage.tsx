@@ -25,7 +25,7 @@ function UsersTable() {
   const removeUser = useRemoveUser();
 
   if (users.isPending) {
-    return <TableSkeleton rows={5} columns={5} />;
+    return <TableSkeleton rows={5} columns={6} />;
   }
   if (users.isError) {
     return <div className="px-4 py-6 text-sm text-red-600 dark:text-red-400">Failed to load users</div>;
@@ -42,7 +42,8 @@ function UsersTable() {
           <th className="px-3 py-2 font-medium w-1/12">Role</th>
           <th className="px-3 py-2 font-medium w-3/12">ntfy topic</th>
           <th className="px-3 py-2 font-medium w-2/12">Notifications</th>
-          <th className="px-3 py-2 font-medium w-2/12" />
+          <th className="px-3 py-2 font-medium w-1/12">Queries</th>
+          <th className="px-3 py-2 font-medium w-1/12" />
         </tr>
       </thead>
       <tbody>
@@ -58,6 +59,7 @@ function UsersTable() {
               >
                 {notificationsEnabled ? "Enabled" : "Disabled"}
               </td>
+              <td className="px-3 py-2">{user.query_count ?? "-"}</td>
               <td className="px-3 py-2 text-right">
                 {!user.is_admin && (
                   <button

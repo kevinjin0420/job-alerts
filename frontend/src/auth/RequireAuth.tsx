@@ -4,8 +4,7 @@ import { useCurrentUser } from "../api/hooks";
 import { useAuth } from "./AuthContext";
 import { FullPageSpinner } from "../components/Skeleton";
 
-/** Gates every authenticated route: no token sends you to /login, an unfinished
- * setup sends you to /onboarding. Both run once here rather than per page. */
+/** Checked once here rather than per page, as the old dashboard did. */
 export function RequireAuth() {
   const { isAuthenticated } = useAuth();
   const location = useLocation();

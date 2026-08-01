@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import json
-import urllib.request
 from typing import Any
 
-from .base import Listing
+from .base import Listing, fetch_url
 
 REQUEST_TIMEOUT_SECONDS = 30
 PAGE_SIZE = 20  # Workday's public CXS API silently 400s above this, regardless of the requested limit.
@@ -34,14 +33,14 @@ class WorkdaySource:
         self._job_type = job_type
 
     def _post(self, body: dict[str, Any]) -> dict[str, Any]:
-        request = urllib.request.Request(
+        response_body = fetch_url(
+            self.name,
             self._api_url,
             data=json.dumps(body).encode("utf-8"),
-            method="POST",
             headers={"Content-Type": "application/json", "User-Agent": "job-alerts-watcher"},
+            timeout=REQUEST_TIMEOUT_SECONDS,
         )
-        with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
-            return json.loads(response.read())
+        return json.loads(response_body)
 
     def _matching_facet(self) -> tuple[str, str] | None:
         """Returns (facetParameter, id) for whichever facet actually distinguishes this job_type on this tenant."""

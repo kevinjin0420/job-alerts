@@ -20,8 +20,7 @@ export function userLabel(userId: string): string {
   return userId === UNKNOWN_USER_ID ? UNKNOWN_USER_LABEL : userId;
 }
 
-/** Fixed alphabetical order so a user keeps the same color across both charts and
- * reloads - identity decides color, not rank. */
+/** Alphabetical so identity decides color, not rank - stable across both charts and reloads. */
 export function buildUserColorMap(userIds: Iterable<string>, isDark: boolean): Map<string, string> {
   const palette = chartPalette(isDark);
   const sorted = Array.from(new Set(userIds))
@@ -59,8 +58,7 @@ export function UserPieChart({
 }) {
   const { isDark } = useTheme();
   const palette = chartPalette(isDark);
-  // Legend labels are user ids (emails); beside the pie they get truncated to a
-  // few characters on a phone, so drop them below it where there is full width.
+  // Emails truncate to a few characters beside the pie on a phone.
   const isNarrow = useMediaQuery("(max-width: 767px)");
 
   const sliced = foldIntoTopSlices(rows.filter((row) => row.value > 0));

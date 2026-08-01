@@ -32,8 +32,7 @@ function SidebarLink({ to, label }: { to: string; label: string }) {
   );
 }
 
-/** onClose is supplied only in the mobile drawer - the docked desktop sidebar has
- * nothing to close, so it renders no dismiss control. */
+/** onClose only in the mobile drawer; the docked sidebar has nothing to close. */
 export function Sidebar({ className = "", onClose }: { className?: string; onClose?: () => void }) {
   const { data: currentUser } = useCurrentUser();
 

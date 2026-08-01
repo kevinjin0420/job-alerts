@@ -231,9 +231,7 @@ export function ListingsPage() {
         {fitScoreFilter}
       </div>
 
-      {/* flex-1/min-h-0 rather than a max-h guess: the panel takes exactly the
-          space left under the header, so <main> never overflows and the page
-          itself does not scroll - only this list does. */}
+      {/* flex-1/min-h-0, not a max-h guess: only this panel scrolls, never the page. */}
       <div className="flex-1 min-h-0 border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 overflow-y-auto">
         {isPending && <TableSkeleton />}
         {isError && <div className="px-4 py-6 text-sm text-red-600 dark:text-red-400">Failed to load listings</div>}

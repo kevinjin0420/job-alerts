@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import re
-import urllib.request
 
-from .base import INTERNSHIP_TITLE_PATTERN, Listing
+from .base import INTERNSHIP_TITLE_PATTERN, Listing, fetch_url
 
 REQUEST_TIMEOUT_SECONDS = 30
 LOC_PATTERN = re.compile(r"<loc>(.*?)</loc>")
@@ -19,9 +18,8 @@ class SitemapSource:
         self._sitemap_url = sitemap_url
 
     def fetch(self) -> list[Listing]:
-        request = urllib.request.Request(self._sitemap_url, headers={"User-Agent": "job-alerts-watcher"})
-        with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
-            xml = response.read().decode("utf-8", errors="replace")
+        body = fetch_url(self.name, self._sitemap_url, headers={"User-Agent": "job-alerts-watcher"}, timeout=REQUEST_TIMEOUT_SECONDS)
+        xml = body.decode("utf-8", errors="replace")
 
         matches: list[Listing] = []
         for url in LOC_PATTERN.findall(xml):

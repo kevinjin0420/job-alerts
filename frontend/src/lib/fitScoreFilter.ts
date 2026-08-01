@@ -7,8 +7,7 @@ export interface FitScoreFilter {
 
 const FILTER_PATTERN = /^\s*(>=|<=|>|<|=)?\s*(\d+)\s*$/;
 
-/** Accepts a bare number ("90" means exactly 90) or one prefixed with a
- * comparison operator (">=90", "<90"); anything else disables the filter. */
+/** "90" means equality, ">=90" compares; anything else disables the filter. */
 export function parseFitScoreFilter(raw: string): FitScoreFilter | null {
   const match = FILTER_PATTERN.exec(raw);
   const digits = match?.[2];

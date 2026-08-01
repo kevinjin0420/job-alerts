@@ -26,8 +26,7 @@ function LogLine({ event }: { event: LogEvent }) {
 }
 
 function RunBlock({ run, lines }: { run: LogRun; lines: LogEvent[] }) {
-  // Failing runs open by default - they are the reason anyone opens this page.
-  const [isOpen, setIsOpen] = useState(run.failureCount > 0);
+  const [isOpen, setIsOpen] = useState(false);
 
   return (
     <div className="border border-neutral-200 dark:border-neutral-800 mb-2 last:mb-0">

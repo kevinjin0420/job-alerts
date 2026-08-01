@@ -1,4 +1,3 @@
-/** Unix seconds rendered in the viewer's local timezone, matching the previous dashboard's format. */
 export function formatLocalDate(unixSeconds: number): string {
   const date = new Date(unixSeconds * 1000);
   const pad = (value: number) => String(value).padStart(2, "0");
