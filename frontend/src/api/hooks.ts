@@ -1,7 +1,10 @@
 import {
+  useInfiniteQuery,
   useMutation,
   useQuery,
   useQueryClient,
+  type InfiniteData,
+  type UseInfiniteQueryResult,
   type UseMutationResult,
   type UseQueryResult,
 } from "@tanstack/react-query";
@@ -16,6 +19,8 @@ import type {
   ConfigOptions,
   CurrentUser,
   ListingsResponse,
+  LogRunsPage,
+  LogSearchPage,
   LogsResponse,
   Metrics,
   NewCompanyRequest,
@@ -34,6 +39,8 @@ export const queryKeys = {
   profile: ["profile"] as const,
   metrics: (range: string) => ["metrics", range] as const,
   logs: ["logs"] as const,
+  logRuns: ["logs", "runs"] as const,
+  logSearch: (query: string) => ["logs", "search", query] as const,
   adminUsers: ["admin", "users"] as const,
   adminSettings: ["admin", "settings"] as const,
   adminCompanies: ["admin", "companies"] as const,
@@ -110,6 +117,33 @@ export function useLogs(): UseQueryResult<LogsResponse, Error> {
     queryKey: queryKeys.logs,
     queryFn: () => apiRequest<LogsResponse>("/api/logs"),
     refetchInterval: AUTO_REFRESH_MS,
+  });
+}
+
+const LOG_RUNS_PAGE_SIZE = 5;
+
+export function useLogRuns(): UseInfiniteQueryResult<InfiniteData<LogRunsPage>, Error> {
+  return useInfiniteQuery({
+    queryKey: queryKeys.logRuns,
+    queryFn: ({ pageParam }) =>
+      apiRequest<LogRunsPage>(
+        `/api/logs?mode=runs&count=${LOG_RUNS_PAGE_SIZE}${pageParam !== null ? `&before=${pageParam}` : ""}`,
+      ),
+    initialPageParam: null as number | null,
+    getNextPageParam: (lastPage) => lastPage.next_cursor,
+  });
+}
+
+export function useLogSearch(query: string): UseInfiniteQueryResult<InfiniteData<LogSearchPage>, Error> {
+  return useInfiniteQuery({
+    queryKey: queryKeys.logSearch(query),
+    queryFn: ({ pageParam }) =>
+      apiRequest<LogSearchPage>(
+        `/api/logs?q=${encodeURIComponent(query)}${pageParam !== null ? `&before=${pageParam}` : ""}`,
+      ),
+    initialPageParam: null as number | null,
+    getNextPageParam: (lastPage) => lastPage.next_cursor,
+    enabled: query.trim().length > 0,
   });
 }
 

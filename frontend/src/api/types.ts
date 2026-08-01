@@ -123,6 +123,25 @@ export interface LogsResponse {
   events: LogEvent[];
 }
 
+export interface LogRun {
+  id: string | null;
+  startTime: string | null;
+  endTime: string | null;
+  durationMs: number | null;
+  lines: LogEvent[];
+  failureCount: number;
+}
+
+export interface LogRunsPage {
+  runs: LogRun[];
+  next_cursor: number | null;
+}
+
+export interface LogSearchPage {
+  events: LogEvent[];
+  next_cursor: number | null;
+}
+
 export interface AdminUser {
   user_id: string;
   email?: string;

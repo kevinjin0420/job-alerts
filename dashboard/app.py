@@ -5,6 +5,7 @@ import concurrent.futures
 import json
 import mimetypes
 import os
+import re
 import secrets
 import time
 import urllib.parse
@@ -221,6 +222,14 @@ def handler(event: dict[str, Any], _context: object) -> dict[str, Any]:
     if method == "GET" and path == "/api/logs":
         if not is_admin:
             return _json_response(403, {"error": "admin only"})
+        params = event.get("queryStringParameters") or {}
+        query = params.get("q", "").strip()
+        before = float(params["before"]) if params.get("before") else None
+        if query:
+            return _json_response(200, _search_log_lines(query, before, SEARCH_PAGE_LIMIT))
+        if params.get("mode") == "runs":
+            count = int(params.get("count", DEFAULT_RUNS_PAGE_SIZE))
+            return _json_response(200, _fetch_runs_page(before, count))
         return _json_response(200, {"events": _recent_log_events()})
     if method == "GET" and path == "/api/metrics":
         range_key = (event.get("queryStringParameters") or {}).get("range", DEFAULT_METRICS_RANGE)
@@ -546,6 +555,21 @@ def _clear_failed_auth(source_ip: str) -> None:
     dynamodb_client.delete_item(TableName=AUTH_ATTEMPTS_TABLE, Key={"source_ip": {"S": source_ip}})
 
 
+def _is_failure_line(message: str) -> bool:
+    return not any(marker in message for marker in NON_FAILURE_LINE_MARKERS) and any(
+        marker in message for marker in FAILURE_MARKERS
+    )
+
+
+def _parse_log_event_row(row: list[dict[str, str]]) -> dict[str, Any] | None:
+    fields = {field["field"]: field["value"] for field in row}
+    timestamp = _parse_insights_timestamp(fields.get("@timestamp", ""))
+    if timestamp is None:
+        return None
+    message = fields.get("@message", "").rstrip("\n")
+    return {"timestamp": timestamp, "message": message, "is_failure": _is_failure_line(message)}
+
+
 def _recent_log_events(hours: int = 24, limit: int = 500) -> list[dict[str, Any]]:
     """Via Logs Insights, not FilterLogEvents - FilterLogEvents scans forward
     from startTime with no pagination here, so its `limit` filled up with the
@@ -554,18 +578,127 @@ def _recent_log_events(hours: int = 24, limit: int = 500) -> list[dict[str, Any]
     never fetched at all, no matter how the returned subset was then sorted.
     `sort @timestamp desc | limit N` asks Insights for the newest N directly."""
     query_string = f"fields @timestamp, @message | sort @timestamp desc | limit {limit}"
-    events: list[dict[str, Any]] = []
-    for row in _run_insights_query(query_string, hours * 60):
+    end_time = time.time()
+    start_time = end_time - hours * 3600
+    events = [_parse_log_event_row(row) for row in _run_insights_query(query_string, start_time, end_time)]
+    return [event for event in events if event is not None]
+
+
+_START_REQUEST_ID_PATTERN = re.compile(r"^START RequestId: (\S+)")
+_END_REQUEST_ID_PATTERN = re.compile(r"^END RequestId: (\S+)")
+_REPORT_REQUEST_ID_PATTERN = re.compile(r"^REPORT RequestId: (\S+)\s+Duration: ([\d.]+) ms")
+
+def _group_log_runs(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Python port of frontend/src/lib/groupLogRuns.ts - events must already be sorted
+    ascending by timestamp. CloudWatch's @requestId field only auto-populates on the
+    platform's own START/END/REPORT lines, not on print() output, so an ordinary line
+    is attributed to whichever run is currently open on a stack rather than by a direct
+    field match. Returns runs newest-first, matching every other list in this app."""
+    runs: list[dict[str, Any]] = []
+    runs_by_id: dict[str, dict[str, Any]] = {}
+    open_stack: list[dict[str, Any]] = []
+    unknown_run: dict[str, Any] | None = None
+
+    def current_run() -> dict[str, Any]:
+        nonlocal unknown_run
+        if open_stack:
+            return open_stack[-1]
+        if unknown_run is None:
+            unknown_run = {"id": None, "startTime": None, "endTime": None, "durationMs": None, "lines": [], "failureCount": 0}
+            runs.append(unknown_run)
+        return unknown_run
+
+    for event in events:
+        message = event["message"]
+        start_match = _START_REQUEST_ID_PATTERN.match(message)
+        start_id = start_match.group(1) if start_match else None
+        if start_id is not None:
+            run: dict[str, Any] = {
+                "id": start_id,
+                "startTime": event["timestamp"],
+                "endTime": None,
+                "durationMs": None,
+                "lines": [],
+                "failureCount": 0,
+            }
+            runs.append(run)
+            runs_by_id[start_id] = run
+            open_stack.append(run)
+
+        end_match = _END_REQUEST_ID_PATTERN.match(message)
+        end_id = end_match.group(1) if end_match else None
+        report_match = _REPORT_REQUEST_ID_PATTERN.match(message)
+        tagged_id = start_id or end_id or (report_match.group(1) if report_match else None)
+        run = runs_by_id.get(tagged_id) if tagged_id else None
+        if run is None:
+            run = current_run()
+
+        run["lines"].append(event)
+        if event.get("is_failure"):
+            run["failureCount"] += 1
+        if report_match is not None:
+            run["durationMs"] = float(report_match.group(2))
+        if end_id is not None:
+            run["endTime"] = event["timestamp"]
+            for i in range(len(open_stack) - 1, -1, -1):
+                if open_stack[i] is run:
+                    del open_stack[i]
+                    break
+
+    return list(reversed(runs))
+
+
+def _run_boundaries(before: float, count: int, lookback_minutes: int) -> list[tuple[str, float]]:
+    """Up to `count` (request_id, start_epoch) pairs for the most recent START
+    RequestId lines strictly before `before` - cheap and precise, since START lines
+    are short and their timestamp *is* the run's start, so a page of N runs never
+    has to guess how many raw lines it'll contain."""
+    query_string = f"fields @timestamp, @message | filter @message like /^START RequestId/ | sort @timestamp desc | limit {count}"
+    start_time = before - lookback_minutes * 60
+    boundaries: list[tuple[str, float]] = []
+    for row in _run_insights_query(query_string, start_time, before):
         fields = {field["field"]: field["value"] for field in row}
-        timestamp = _parse_insights_timestamp(fields.get("@timestamp", ""))
-        if timestamp is None:
+        match = _START_REQUEST_ID_PATTERN.match(fields.get("@message", ""))
+        if match is None:
             continue
-        message = fields.get("@message", "").rstrip("\n")
-        is_failure = not any(marker in message for marker in NON_FAILURE_LINE_MARKERS) and any(
-            marker in message for marker in FAILURE_MARKERS
-        )
-        events.append({"timestamp": timestamp, "message": message, "is_failure": is_failure})
-    return events
+        parsed = _parse_insights_timestamp(fields.get("@timestamp", ""))
+        if parsed is None:
+            continue
+        boundaries.append((match.group(1), datetime.fromisoformat(parsed).timestamp()))
+    return boundaries
+
+
+def _fetch_runs_page(before: float | None, count: int) -> dict[str, Any]:
+    window_end = before if before is not None else time.time()
+    boundaries = _run_boundaries(window_end, count, RUN_LOOKBACK_MINUTES)
+    if not boundaries:
+        return {"runs": [], "next_cursor": None}
+
+    window_start = min(epoch for _, epoch in boundaries)
+    boundary_ids = {request_id for request_id, _ in boundaries}
+    query_string = "fields @timestamp, @message | sort @timestamp asc"
+    raw_events = [_parse_log_event_row(row) for row in _run_insights_query(query_string, window_start, window_end)]
+    events = [event for event in raw_events if event is not None]
+
+    runs = [run for run in _group_log_runs(events) if run["id"] in boundary_ids]
+    # -1s so the next page's window strictly excludes this page's oldest run (Insights' endTime is inclusive).
+    next_cursor = (window_start - 1) if len(boundaries) == count else None
+    return {"runs": runs, "next_cursor": next_cursor}
+
+
+def _search_log_lines(pattern: str, before: float | None, limit: int) -> dict[str, Any]:
+    """Insights `like "literal"` (a plain substring match) rather than `like /regex/`,
+    so user input is never interpreted as a regex - avoids both injection risk and
+    surprising regex semantics for what's meant to be a plain-text search box."""
+    escaped = pattern.replace("\\", "\\\\").replace('"', '\\"')
+    query_string = f'fields @timestamp, @message | filter @message like "{escaped}" | sort @timestamp desc | limit {limit}'
+    end_time = before if before is not None else time.time()
+    start_time = end_time - SEARCH_LOOKBACK_MINUTES * 60
+    events = [_parse_log_event_row(row) for row in _run_insights_query(query_string, start_time, end_time)]
+    events = [event for event in events if event is not None]
+    oldest_epoch = min((datetime.fromisoformat(e["timestamp"]).timestamp() for e in events), default=None)
+    next_cursor = (oldest_epoch - 1) if len(events) == limit and oldest_epoch is not None else None
+    return {"events": events, "next_cursor": next_cursor}
 
 
 def _metric_query(
@@ -637,6 +770,11 @@ METRICS_RANGE_PRESETS_MINUTES = {
 }
 DEFAULT_METRICS_RANGE = "24h"
 
+DEFAULT_RUNS_PAGE_SIZE = 5
+RUN_LOOKBACK_MINUTES = METRICS_RANGE_PRESETS_MINUTES["1w"]
+SEARCH_PAGE_LIMIT = 200
+SEARCH_LOOKBACK_MINUTES = METRICS_RANGE_PRESETS_MINUTES["1w"]
+
 
 def _metric_period_seconds(window_seconds: int) -> int:
     """Picks a CloudWatch period that keeps a time-series query to a sane number
@@ -664,16 +802,14 @@ def _insights_bin_expression(window_seconds: int) -> str:
     return _BIN_SECONDS_TO_EXPRESSION[_insights_bin_seconds(window_seconds)]
 
 
-def _run_insights_query(query_string: str, minutes: int) -> list[list[dict[str, str]]]:
+def _run_insights_query(query_string: str, start_time: float, end_time: float) -> list[list[dict[str, str]]]:
     """Runs a CloudWatch Logs Insights query to completion (or gives up after
     LOG_QUERY_MAX_POLLS) and returns its raw result rows - each row a list of
     {field, value} dicts, same shape boto3 returns from get_query_results."""
-    end_time = int(time.time())
-    start_time = end_time - minutes * 60
     query_id = logs_client.start_query(
         logGroupName=WATCH_LOG_GROUP,
-        startTime=start_time,
-        endTime=end_time,
+        startTime=int(start_time),
+        endTime=int(end_time),
         queryString=query_string,
     )["queryId"]
 
@@ -708,8 +844,10 @@ def _structured_log_series(event_name: str, minutes: int) -> list[dict[str, Any]
     """
     limit = min(5000, max(200, minutes // 5 + 100))
     query_string = f"fields @timestamp, @message | filter @message like /{event_name}/ | sort @timestamp desc | limit {limit}"
+    end_time = time.time()
+    start_time = end_time - minutes * 60
     parsed: list[dict[str, Any]] = []
-    for row in _run_insights_query(query_string, minutes):
+    for row in _run_insights_query(query_string, start_time, end_time):
         fields = {field["field"]: field["value"] for field in row}
         try:
             payload = json.loads(fields.get("@message", ""))
@@ -743,6 +881,8 @@ def _token_usage_series(minutes: int) -> list[dict[str, Any]]:
     window_seconds = minutes * 60
     bin_seconds = _insights_bin_seconds(window_seconds)
     bin_expression = _BIN_SECONDS_TO_EXPRESSION[bin_seconds]
+    end_time = time.time()
+    start_time = end_time - window_seconds
     query_string = (
         "fields @timestamp, @message"
         " | filter @message like /classifier_call/ or @message like /validity_check/"
@@ -752,7 +892,7 @@ def _token_usage_series(minutes: int) -> list[dict[str, Any]]:
         " | sort bucket asc"
     )
     by_timestamp: dict[str, dict[str, Any]] = {}
-    for row in _run_insights_query(query_string, minutes):
+    for row in _run_insights_query(query_string, start_time, end_time):
         fields = {field["field"]: field["value"] for field in row}
         timestamp = _parse_insights_timestamp(fields.get("bucket", ""))
         if timestamp is None:
@@ -763,8 +903,6 @@ def _token_usage_series(minutes: int) -> list[dict[str, Any]]:
             "output_tokens": int(float(fields.get("output_tokens", 0))),
         }
 
-    end_time = time.time()
-    start_time = end_time - window_seconds
     bucket_epoch = int(start_time // bin_seconds) * bin_seconds
     filled: list[dict[str, Any]] = []
     while bucket_epoch <= end_time:
@@ -785,8 +923,10 @@ def _token_usage_by_user(minutes: int) -> list[dict[str, Any]]:
         " | stats sum(raw_input) as input_tokens, sum(raw_output) as output_tokens by raw_user_id"
         " | sort input_tokens desc"
     )
+    end_time = time.time()
+    start_time = end_time - minutes * 60
     parsed: list[dict[str, Any]] = []
-    for row in _run_insights_query(query_string, minutes):
+    for row in _run_insights_query(query_string, start_time, end_time):
         fields = {field["field"]: field["value"] for field in row}
         parsed.append(
             {
