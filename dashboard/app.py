@@ -22,10 +22,10 @@ from classifier import (
     RESPONSE_INSTRUCTION,
     RESPONSE_INSTRUCTION_WITH_SCORE,
     RESUME_LABEL,
-    ClassifierError,
     is_good_fit,
 )
 from config import SUPPORTED_JOB_TYPES
+from llm import LLMCallError
 from notifiers import NotificationError, send_ntfy_message
 from resume import ResumeFetchError, extract_resume_text, fetch_resume_text_from_url
 from sources.base import Listing
@@ -37,7 +37,7 @@ from users import (
     delete_user_resume,
     find_user_by_api_key,
     generate_api_key,
-    get_classifier_model,
+    get_llm_model,
     get_user,
     list_all_users,
     list_companies,
@@ -46,8 +46,8 @@ from users import (
     load_user_config,
     load_user_profile,
     retry_listing,
-    save_classifier_model,
     save_company,
+    save_llm_model,
     save_ntfy_topic,
     save_user_config,
     save_user_profile,
@@ -262,7 +262,7 @@ def _handle_test_classifier(user_id: str, body: dict[str, Any]) -> dict[str, Any
     fit_prompt = str(body.get("fit_prompt", ""))
     if not fit_prompt:
         return _json_response(400, {"error": "fit_prompt is required"})
-    classifier_model = get_classifier_model()
+    llm_model = get_llm_model()
     sample = Listing(
         source="test",
         id="test",
@@ -276,9 +276,9 @@ def _handle_test_classifier(user_id: str, body: dict[str, Any]) -> dict[str, Any
     try:
         # Single attempt, 20s cap - stays under API Gateway's hard 30s integration timeout.
         result = is_good_fit(
-            OPENROUTER_API_KEY, classifier_model, fit_prompt, sample, resume_text, max_attempts=1, request_timeout_seconds=20
+            OPENROUTER_API_KEY, llm_model, fit_prompt, sample, resume_text, max_attempts=1, request_timeout_seconds=20
         )
-    except ClassifierError as error:
+    except LLMCallError as error:
         return _json_response(502, {"error": str(error)})
     return _json_response(200, {"fits": result.fits, "reason": result.reason, "fit_score": result.fit_score})
 
@@ -488,14 +488,14 @@ def _handle_admin(method: str, path: str, event: dict[str, Any], admin_user_id: 
         return _json_response(200, {"sources": list_source_health()})
 
     if method == "GET" and path == "/api/admin/settings":
-        return _json_response(200, {"classifier_model": get_classifier_model()})
+        return _json_response(200, {"llm_model": get_llm_model()})
 
     if method == "PUT" and path == "/api/admin/settings":
         body = json.loads(event.get("body") or "{}")
-        classifier_model = str(body.get("classifier_model", "")).strip()
-        if not classifier_model:
-            return _json_response(400, {"error": "classifier_model is required"})
-        save_classifier_model(classifier_model)
+        llm_model = str(body.get("llm_model", "")).strip()
+        if not llm_model:
+            return _json_response(400, {"error": "llm_model is required"})
+        save_llm_model(llm_model)
         return _json_response(200, {"status": "saved"})
 
     if method == "POST" and path == "/api/admin/trigger-scan":
@@ -729,12 +729,12 @@ def _structured_log_series(event_name: str, minutes: int) -> list[dict[str, Any]
 def _token_usage_series(minutes: int) -> list[dict[str, Any]]:
     """Sums classifier_call/validity_check token usage into time buckets sized
     to the selected window (see _insights_bin_expression) - both event types
-    already log input_tokens/output_tokens per OpenRouter call (see classifier.py),
+    already log input_tokens/output_tokens per OpenRouter call (see llm.py),
     this just aggregates them server-side via Insights instead of pulling every
     individual call's tokens back to sum in Python.
 
     Insights' `stats ... by bin()` only returns buckets that actually matched
-    a row - a bucket with zero classifier activity (common; most 5-minute runs
+    a row - a bucket with zero LLM activity (common; most 5-minute runs
     find nothing new to classify) is simply absent, not present with a zero.
     Left as-is, Chart.js draws a line connecting only the sparse real points,
     implying a trend across a gap that was actually flat zero the whole time.
@@ -913,7 +913,7 @@ def _recent_metrics(minutes: int = 1440) -> dict[str, Any]:
         last_ran_future = executor.submit(_last_invocation_time)
         duration_series_future = executor.submit(_duration_series, minutes)
         throughput_future = executor.submit(_structured_log_series, "scan_summary", minutes)
-        backlog_future = executor.submit(_structured_log_series, "classifier_backlog", minutes)
+        backlog_future = executor.submit(_structured_log_series, "validator_backlog", minutes)
         token_usage_future = executor.submit(_token_usage_series, minutes)
 
         invocation_metrics = invocation_metrics_future.result()

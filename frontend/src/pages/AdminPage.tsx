@@ -5,7 +5,7 @@ import {
   useAdminUsers,
   useInviteUser,
   useRemoveUser,
-  useSaveClassifierModel,
+  useSaveLlmModel,
   useTriggerScan,
 } from "../api/hooks";
 import { PageHeader } from "../components/AppLayout";
@@ -84,16 +84,16 @@ export function AdminPage() {
   const users = useAdminUsers();
   const inviteUser = useInviteUser();
   const settings = useAdminSettings();
-  const saveModel = useSaveClassifierModel();
+  const saveModel = useSaveLlmModel();
   const triggerScan = useTriggerScan();
 
   const [inviteEmail, setInviteEmail] = useState("");
-  const [classifierModel, setClassifierModel] = useState("");
+  const [llmModel, setLlmModel] = useState("");
 
-  const loadedModel = settings.data?.classifier_model;
+  const loadedModel = settings.data?.llm_model;
   useEffect(() => {
     if (loadedModel !== undefined) {
-      setClassifierModel(loadedModel);
+      setLlmModel(loadedModel);
     }
   }, [loadedModel]);
 
@@ -161,18 +161,18 @@ export function AdminPage() {
       </h2>
 
       <div className={CARD_CLASS}>
-        <label className={LABEL_CLASS}>Classifier model</label>
+        <label className={LABEL_CLASS}>LLM model</label>
         <div className="flex flex-wrap gap-3">
           <input
             type="text"
-            placeholder="qwen/qwen3.6-flash"
-            value={classifierModel}
-            onChange={(event) => setClassifierModel(event.target.value)}
+            placeholder="openai/gpt-oss-120b"
+            value={llmModel}
+            onChange={(event) => setLlmModel(event.target.value)}
             className={`${INPUT_CLASS} font-mono`}
           />
           <button
             type="button"
-            onClick={() => classifierModel.trim() && saveModel.mutate(classifierModel.trim())}
+            onClick={() => llmModel.trim() && saveModel.mutate(llmModel.trim())}
             disabled={saveModel.isPending}
             className={PRIMARY_BUTTON_CLASS}
           >

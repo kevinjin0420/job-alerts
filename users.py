@@ -18,7 +18,7 @@ SOURCE_HEALTH_TABLE = "job-alerts-source-health"
 USER_PROFILE_TABLE = "job-alerts-user-profile"
 SETTINGS_TABLE = "job-alerts-settings"
 LISTING_VALIDITY_TABLE = "job-alerts-listing-validity"
-DEFAULT_CLASSIFIER_MODEL = "qwen/qwen3.6-flash"
+DEFAULT_LLM_MODEL = "openai/gpt-oss-120b"
 
 _dynamodb = boto3.client("dynamodb")
 _deserializer = TypeDeserializer()
@@ -125,7 +125,7 @@ def retry_listing(user_id: str, listing_id: str) -> None:
 def get_listing_validity(listing_id: str) -> dict[str, Any] | None:
     """Whether a listing is a real job posting vs. scraped page furniture - an
     objective fact about the listing, cached once here rather than recomputed
-    per user (see classifier.check_is_job_posting)."""
+    per user (see validator.check_is_job_posting)."""
     response = _dynamodb.get_item(TableName=LISTING_VALIDITY_TABLE, Key={"listing_id": {"S": listing_id}})
     item = response.get("Item")
     return _unwrap_item(item) if item else None
@@ -365,16 +365,15 @@ def list_source_health() -> list[dict[str, Any]]:
     return [_unwrap_item(item) for item in response.get("Items", [])]
 
 
-def get_classifier_model() -> str:
-    response = _dynamodb.get_item(TableName=SETTINGS_TABLE, Key={"setting_name": {"S": "classifier_model"}})
+def get_llm_model() -> str:
+    """The single model used for both the validator and the classifier - see llm.call_openrouter."""
+    response = _dynamodb.get_item(TableName=SETTINGS_TABLE, Key={"setting_name": {"S": "llm_model"}})
     item = response.get("Item")
-    return str(item["value"]["S"]) if item and "value" in item else DEFAULT_CLASSIFIER_MODEL
+    return str(item["value"]["S"]) if item and "value" in item else DEFAULT_LLM_MODEL
 
 
-def save_classifier_model(model: str) -> None:
-    _dynamodb.put_item(
-        TableName=SETTINGS_TABLE, Item={"setting_name": {"S": "classifier_model"}, "value": {"S": model}}
-    )
+def save_llm_model(model: str) -> None:
+    _dynamodb.put_item(TableName=SETTINGS_TABLE, Item={"setting_name": {"S": "llm_model"}, "value": {"S": model}})
 
 
 def load_user_profile(user_id: str) -> dict[str, Any]:

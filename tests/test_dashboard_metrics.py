@@ -37,11 +37,11 @@ class StructuredLogSeriesTests(unittest.TestCase):
         results = [
             _insights_row("2026-07-30 21:00:00.000", "not json"),
             _insights_row("2026-07-30 21:01:00.000", '{"event": "other_event", "count": 1}'),
-            _insights_row("2026-07-30 21:02:00.000", '{"event": "classifier_backlog", "count": 7}'),
+            _insights_row("2026-07-30 21:02:00.000", '{"event": "validator_backlog", "count": 7}'),
         ]
         with patch.object(app.logs_client, "start_query", return_value={"queryId": "q1"}):
             with patch.object(app.logs_client, "get_query_results", return_value={"status": "Complete", "results": results}):
-                series = app._structured_log_series("classifier_backlog", 24)
+                series = app._structured_log_series("validator_backlog", 24)
 
         self.assertEqual(len(series), 1)
         self.assertEqual(series[0]["count"], 7)

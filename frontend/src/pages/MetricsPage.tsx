@@ -137,7 +137,7 @@ export function MetricsPage() {
             yAxisLabel="Duration (ms)"
           />
           <TimeSeriesChart
-            title="Classifier backlog"
+            title="Validator backlog"
             series={[{ key: "count", label: "Uncached listings", colorIndex: 1 }]}
             data={metrics.data?.backlog_series ?? []}
             windowMinutes={range.minutes}

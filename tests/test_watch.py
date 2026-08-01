@@ -6,7 +6,8 @@ import time
 import unittest
 from unittest.mock import patch
 
-from classifier import ClassificationResult, ClassifierError
+from classifier import ClassificationResult
+from llm import LLMCallError
 from sources.base import Listing
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "watch"))
@@ -181,7 +182,7 @@ class PassesClassifierFailureModeTests(unittest.TestCase):
     docstring. None means "retry next run", not "notify"."""
 
     def test_returns_none_on_classifier_error_instead_of_notifying(self) -> None:
-        with patch("watch.is_good_fit", side_effect=ClassifierError("429 too many requests")):
+        with patch("watch.is_good_fit", side_effect=LLMCallError("429 too many requests")):
             with patch("watch.record_source_failure", return_value=1):
                 result = passes_classifier("fake-key", "fake-model", "must be remote", _listing("1"))
         self.assertIsNone(result)
@@ -203,7 +204,7 @@ class ClassifierFailureAlertingTests(unittest.TestCase):
     """Persistent classifier failure should page admins once, not every run - same alerted-until-recovery pattern as source health."""
 
     def test_crossing_threshold_alerts_once(self) -> None:
-        with patch("watch.is_good_fit", side_effect=ClassifierError("boom")):
+        with patch("watch.is_good_fit", side_effect=LLMCallError("boom")):
             with patch("watch.record_source_failure", return_value=SOURCE_FAILURE_ALERT_THRESHOLD):
                 with patch("watch.is_source_alerted", return_value=False):
                     with patch("watch.mark_source_alerted") as mock_mark:
@@ -213,7 +214,7 @@ class ClassifierFailureAlertingTests(unittest.TestCase):
         mock_alert.assert_called_once()
 
     def test_already_alerted_is_not_reported_again(self) -> None:
-        with patch("watch.is_good_fit", side_effect=ClassifierError("boom")):
+        with patch("watch.is_good_fit", side_effect=LLMCallError("boom")):
             with patch("watch.record_source_failure", return_value=SOURCE_FAILURE_ALERT_THRESHOLD):
                 with patch("watch.is_source_alerted", return_value=True):
                     with patch("watch.mark_source_alerted") as mock_mark:
@@ -223,7 +224,7 @@ class ClassifierFailureAlertingTests(unittest.TestCase):
         mock_alert.assert_not_called()
 
     def test_below_threshold_does_not_alert(self) -> None:
-        with patch("watch.is_good_fit", side_effect=ClassifierError("boom")):
+        with patch("watch.is_good_fit", side_effect=LLMCallError("boom")):
             with patch("watch.record_source_failure", return_value=1):
                 with patch("watch.alert_admins_classifier_failing") as mock_alert:
                     passes_classifier("fake-key", "fake-model", "must be remote", _listing("1"))
@@ -318,10 +319,10 @@ class ResolveListingValidityTests(unittest.TestCase):
 
         mock_check.assert_called_once()
 
-    def test_classifier_error_assumes_valid(self) -> None:
+    def test_llm_error_assumes_valid(self) -> None:
         listing = _listing("1")
         with patch("watch.get_listing_validity", return_value=None):
-            with patch("watch.check_is_job_posting", side_effect=ClassifierError("boom")):
+            with patch("watch.check_is_job_posting", side_effect=LLMCallError("boom")):
                 with patch("watch.save_listing_validity") as mock_save:
                     validity = resolve_listing_validity([listing], "fake-key", "fake-model")
 

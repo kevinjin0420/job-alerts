@@ -9,7 +9,8 @@ import time
 from typing import Any
 
 from classifier import MAX_ATTEMPTS as CLASSIFIER_MAX_ATTEMPTS
-from classifier import ClassificationResult, ClassifierError, check_is_job_posting, is_good_fit
+from classifier import ClassificationResult, is_good_fit
+from llm import LLMCallError
 from notifiers import NotificationError, notify, notify_message
 from resume import ResumeFetchError, fetch_resume_text_from_url
 from sources import Listing, Source, build_sources
@@ -22,8 +23,8 @@ from sources.sitemap import SitemapSource
 from sources.workday import WorkdaySource
 from sources.zyte import ZyteSource
 from users import (
-    get_classifier_model,
     get_listing_validity,
+    get_llm_model,
     get_source_last_success,
     is_source_alerted,
     list_active_users,
@@ -38,6 +39,7 @@ from users import (
     record_source_success,
     save_listing_validity,
 )
+from validator import check_is_job_posting
 
 DEFAULT_JOB_TYPES = ["intern"]
 SOURCE_FAILURE_ALERT_THRESHOLD = 3
@@ -46,9 +48,9 @@ JOB_TYPE_URL_FIELDS = {"intern": "intern_url", "newgrad": "newgrad_url", "fullti
 # Shared by zyte and render - both render a page via a real browser; the cooldown avoids hammering
 # the same page (real money for zyte, just courtesy for render, but the same interval works for both).
 RENDERED_PAGE_FETCH_INTERVAL_SECONDS = 4 * 60 * 60
-# I/O-bound OpenRouter calls - a thread pool cuts N sequential calls to N/32; safe to raise since a classifier failure now fails closed (see passes_classifier), not open.
-CLASSIFIER_CONCURRENCY = 32
-# Unlike CLASSIFIER_CONCURRENCY, each fetch hits a different company's domain - no shared endpoint to respect, so this can run high (sequential fetching wasted 47s+/run).
+# I/O-bound OpenRouter calls (validator or classifier) - a thread pool cuts N sequential calls to N/32; safe to raise since a classifier failure now fails closed (see passes_classifier), not open.
+LLM_CALL_CONCURRENCY = 32
+# Unlike LLM_CALL_CONCURRENCY, each fetch hits a different company's domain - no shared endpoint to respect, so this can run high (sequential fetching wasted 47s+/run).
 FETCH_CONCURRENCY = 25
 # ponytail: Zyte is billed per request, unlike every other source kind - gate it
 # to a 6h cadence here (at source-selection time, not inside ZyteSource itself)
@@ -208,7 +210,7 @@ def classifier_enabled(openrouter_api_key: str | None, fit_prompt: str) -> bool:
 
 def passes_classifier(
     openrouter_api_key: str | None,
-    classifier_model: str,
+    llm_model: str,
     fit_prompt: str,
     listing: Listing,
     resume_text: str | None = None,
@@ -218,7 +220,7 @@ def passes_classifier(
 ) -> ClassificationResult | None:
     """fits=True means "notify". Disabled (no key, no prompt, or unedited placeholder
     prompt) fails open, since there's nothing to check against. is_good_fit already
-    retries CLASSIFIER_MAX_ATTEMPTS times with backoff internally - a ClassifierError
+    retries CLASSIFIER_MAX_ATTEMPTS times with backoff internally - an LLMCallError
     here means every one of those attempts failed. Returns None ("couldn't classify
     this run") rather than failing open - failing open used to notify on every
     affected listing regardless of fit, which under a sustained failure (e.g.
@@ -229,8 +231,8 @@ def passes_classifier(
     if not classifier_enabled(openrouter_api_key, fit_prompt):
         return ClassificationResult(fits=True, reason="classifier disabled")
     try:
-        result = is_good_fit(openrouter_api_key, classifier_model, fit_prompt, listing, resume_text, user_id=user_id)
-    except ClassifierError as error:
+        result = is_good_fit(openrouter_api_key, llm_model, fit_prompt, listing, resume_text, user_id=user_id)
+    except LLMCallError as error:
         print(
             f"Classifier failed for {listing.company_name} - {listing.title} after {CLASSIFIER_MAX_ATTEMPTS} attempts, will retry next run: {error}",
             file=sys.stderr,
@@ -271,22 +273,22 @@ def fetch_all_listings(sources: list[Source]) -> tuple[list[Listing], list[str]]
 
 
 def _check_listing_validity(
-    listing: Listing, openrouter_api_key: str, classifier_model: str
+    listing: Listing, openrouter_api_key: str, llm_model: str
 ) -> tuple[bool, str]:
     """Prints the validator's rejection here, once per unique listing - not in process_user, which would misattribute a shared verdict once per user who sees it."""
     try:
-        is_job_posting, reason = check_is_job_posting(openrouter_api_key, classifier_model, listing)
-    except ClassifierError as error:
+        is_job_posting, reason = check_is_job_posting(openrouter_api_key, llm_model, listing)
+    except LLMCallError as error:
         print(f"Validity check failed for {listing.company_name} - {listing.title}, assuming valid: {error}", file=sys.stderr)
         is_job_posting, reason = True, f"validity check error, assumed valid: {error}"
     if not is_job_posting:
-        print(f"validator rejected: {listing.company_name} - {listing.title} ({reason}) [validator: {classifier_model}]")
+        print(f"validator rejected: {listing.company_name} - {listing.title} ({reason}) [validator: {llm_model}]")
     save_listing_validity(listing.unique_id, is_job_posting=is_job_posting, reason=reason)
     return is_job_posting, reason
 
 
 def resolve_listing_validity(
-    all_listings: list[Listing], openrouter_api_key: str | None, classifier_model: str
+    all_listings: list[Listing], openrouter_api_key: str | None, llm_model: str
 ) -> dict[str, tuple[bool, str]]:
     """Whether each listing is a real job posting vs. scraped page furniture - checked once per listing (shared across users) and cached forever in DynamoDB.
 
@@ -310,12 +312,12 @@ def resolve_listing_validity(
 
     # Structured (not the human-readable prints elsewhere) so the dashboard's metrics
     # page can parse it out of CloudWatch Logs as a per-run backlog data point.
-    print(json.dumps({"event": "classifier_backlog", "count": len(uncached)}))
+    print(json.dumps({"event": "validator_backlog", "count": len(uncached)}))
 
     if uncached:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=CLASSIFIER_CONCURRENCY) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=LLM_CALL_CONCURRENCY) as executor:
             futures = {
-                executor.submit(_check_listing_validity, listing, openrouter_api_key, classifier_model): listing
+                executor.submit(_check_listing_validity, listing, openrouter_api_key, llm_model): listing
                 for listing in uncached
             }
             for future in concurrent.futures.as_completed(futures):
@@ -380,7 +382,7 @@ def process_user(
     smtp_user: str,
     smtp_pass: str,
     openrouter_api_key: str | None,
-    classifier_model: str,
+    llm_model: str,
     listing_validity: dict[str, tuple[bool, str]],
 ) -> tuple[int, int, int, bool]:
     """Returns (new_count, notified_count, dismissed_count, had_notification_failure)."""
@@ -427,12 +429,12 @@ def process_user(
     ]
     classifications: dict[str, ClassificationResult | None] = {}
     if listings_needing_classification:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=CLASSIFIER_CONCURRENCY) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=LLM_CALL_CONCURRENCY) as executor:
             futures = {
                 executor.submit(
                     passes_classifier,
                     openrouter_api_key,
-                    classifier_model,
+                    llm_model,
                     fit_prompt,
                     listing,
                     resume_text,
@@ -459,7 +461,7 @@ def process_user(
         if not classification.fits:
             record_listings(user_id, [(listing, "dismissed", classification.reason, classification.fit_score)])
             dismissed_count += 1
-            print(f"User {user_id}: classifier dismissed: {listing.company_name} - {listing.title} ({classification.reason}) [classifier: {classifier_model}]")
+            print(f"User {user_id}: classifier dismissed: {listing.company_name} - {listing.title} ({classification.reason}) [classifier: {llm_model}]")
             continue
         try:
             notify(ntfy_topic, smtp_user, smtp_pass, email_recipients, listing)
@@ -473,7 +475,7 @@ def process_user(
             continue
         record_listings(user_id, [(listing, "notified", classification.reason, classification.fit_score)])
         notified_count += 1
-        print(f"User {user_id}: notified: {listing.company_name} - {listing.title} [classifier: {classifier_model}]")
+        print(f"User {user_id}: notified: {listing.company_name} - {listing.title} [classifier: {llm_model}]")
 
     return len(new_listings), notified_count, dismissed_count, had_notification_failure
 
@@ -485,7 +487,7 @@ def main() -> int:
         print("Missing required environment variables: SMTP_USER, SMTP_PASS", file=sys.stderr)
         return 1
     openrouter_api_key = os.environ.get("OPENROUTER_API_KEY")
-    classifier_model = get_classifier_model()
+    llm_model = get_llm_model()
 
     active_users = list_active_users()
     if not active_users:
@@ -515,7 +517,7 @@ def main() -> int:
         alert_admins(newly_unhealthy_sources, smtp_user, smtp_pass)
 
     # Checked once here, shared across every user - see resolve_listing_validity's docstring.
-    listing_validity = resolve_listing_validity(all_listings, openrouter_api_key, classifier_model)
+    listing_validity = resolve_listing_validity(all_listings, openrouter_api_key, llm_model)
 
     total_new = total_notified = total_dismissed = 0
     had_notification_failure = False
@@ -523,7 +525,7 @@ def main() -> int:
         user_id = str(user["user_id"])
         new_count, notified_count, dismissed_count, user_had_failure = process_user(
             user, user_configs[user_id], all_listings, catalog, smtp_user, smtp_pass, openrouter_api_key,
-            classifier_model, listing_validity,
+            llm_model, listing_validity,
         )
         total_new += new_count
         total_notified += notified_count

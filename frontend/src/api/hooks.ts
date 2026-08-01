@@ -146,18 +146,18 @@ export function useRemoveUser(): UseMutationResult<void, Error, string> {
   });
 }
 
-export function useAdminSettings(): UseQueryResult<{ classifier_model: string }, Error> {
+export function useAdminSettings(): UseQueryResult<{ llm_model: string }, Error> {
   return useQuery({
     queryKey: queryKeys.adminSettings,
-    queryFn: () => apiRequest<{ classifier_model: string }>("/api/admin/settings"),
+    queryFn: () => apiRequest<{ llm_model: string }>("/api/admin/settings"),
   });
 }
 
-export function useSaveClassifierModel(): UseMutationResult<void, Error, string> {
+export function useSaveLlmModel(): UseMutationResult<void, Error, string> {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (classifierModel: string) =>
-      apiRequest<void>("/api/admin/settings", { method: "PUT", body: { classifier_model: classifierModel } }),
+    mutationFn: (llmModel: string) =>
+      apiRequest<void>("/api/admin/settings", { method: "PUT", body: { llm_model: llmModel } }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.adminSettings }),
   });
 }
