@@ -11,7 +11,10 @@ from typing import Any
 from sources.base import Listing
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-REQUEST_TIMEOUT_SECONDS = 30
+# 10 attempts x 15s + (1+2+...+9)s backoff = ~195s worst case for one call - stays well under
+# the watch Lambda's timeout even with a stuck listing, so a live outage still reaches the
+# admin-alert path instead of the whole run getting killed mid-retry.
+REQUEST_TIMEOUT_SECONDS = 15
 MAX_ATTEMPTS = 10
 RETRY_BACKOFF_BASE_SECONDS = 1
 

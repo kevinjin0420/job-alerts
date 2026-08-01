@@ -14,7 +14,7 @@ from resume import ResumeFetchError, fetch_resume_text_from_url
 from sources import Listing, Source, build_sources
 from sources.amazon import QUERY_BY_JOB_TYPE as AMAZON_QUERY_BY_JOB_TYPE
 from sources.amazon import AmazonJobsSource
-from sources.ashby import AshbySource
+from sources.ashby import EMPLOYMENT_TYPE_BY_JOB_TYPE, AshbySource
 from sources.oracle import OracleSource
 from sources.sitemap import SitemapSource
 from sources.workday import WorkdaySource
@@ -119,6 +119,32 @@ def _job_type_url(entry: dict[str, object], job_type: str) -> str | None:
     return str(specific_url) if specific_url else (str(entry["general_url"]) if entry.get("general_url") else None)
 
 
+def _zyte_job_type_tag(entry: dict[str, object], job_type: str) -> str:
+    """Canonical tag for this job_type's zyte source. Computed by scanning the full
+    JOB_TYPE_URL_FIELDS universe against the catalog entry (not against whatever
+    subset of job_types a particular caller happens to want), so it resolves the
+    same way whether called for the global shared fetch or for one user's own
+    filtering. Job types that resolve to the identical URL (e.g. a company's
+    "early-career-talent" page serving both interns and new grads) collapse into
+    one tag, so that page is fetched once and each listing gets one unique_id -
+    not one per job_type that happens to point at it."""
+    target_url = _job_type_url(entry, job_type)
+    matching = sorted(jt for jt in JOB_TYPE_URL_FIELDS if _job_type_url(entry, jt) == target_url)
+    return "+".join(matching) if matching else job_type
+
+
+def _ashby_job_type_tag(job_type: str) -> str:
+    """Canonical tag for this job_type's ashby source. Ashby has no distinct "new
+    grad" employment type (see EMPLOYMENT_TYPE_BY_JOB_TYPE) - "newgrad" and
+    "fulltime" both filter for FullTime and would otherwise scrape the same board
+    and notify on the same postings twice. Computed from the fixed
+    EMPLOYMENT_TYPE_BY_JOB_TYPE mapping alone (not from a caller's requested
+    subset), so it resolves the same way for every caller."""
+    wanted = EMPLOYMENT_TYPE_BY_JOB_TYPE.get(job_type, "FullTime")
+    matching = sorted(jt for jt in JOB_TYPE_URL_FIELDS if EMPLOYMENT_TYPE_BY_JOB_TYPE.get(jt, "FullTime") == wanted)
+    return "+".join(matching) if matching else job_type
+
+
 def build_job_type_sources(
     pairs: set[tuple[str, str]], catalog: dict[str, dict[str, object]], *, enforce_zyte_cooldown: bool = True
 ) -> list[Source]:
@@ -128,8 +154,14 @@ def build_job_type_sources(
     source's .name for filtering (as process_user does) rather than to
     actually fetch() - otherwise the cooldown looks "too recent" right after
     the shared fetch succeeds, and silently drops listings it just paid for.
+
+    Zyte/Ashby job_types that resolve to the identical underlying fetch are
+    merged into one Source with a combined name tag (see _zyte_job_type_tag /
+    _ashby_job_type_tag) - seen_names dedupes the pairs loop down to one Source
+    per merged identity so it's fetched once, not once per job_type in the group.
     """
     sources: list[Source] = []
+    seen_names: set[str] = set()
     for company, job_type in pairs:
         entry = catalog.get(company.strip().lower())
         if not entry:
@@ -137,18 +169,29 @@ def build_job_type_sources(
         kind = entry.get("source_kind")
         if kind == "ashby":
             board_name = entry.get("board_name")
-            if board_name:
-                sources.append(AshbySource(str(entry["company_name"]), str(board_name), job_type))
+            if not board_name:
+                continue
+            source = AshbySource(str(entry["company_name"]), str(board_name), job_type)
+            source.name = f"ashby:{entry['company_name']}:{_ashby_job_type_tag(job_type)}"
+            if source.name in seen_names:
+                continue
+            seen_names.add(source.name)
+            sources.append(source)
         elif kind == "zyte":
             url = _job_type_url(entry, job_type)
-            if url:
-                source = ZyteSource(str(entry["company_name"]), str(url), job_type)
-                if not enforce_zyte_cooldown:
+            if not url:
+                continue
+            tag = _zyte_job_type_tag(entry, job_type)
+            source = ZyteSource(str(entry["company_name"]), str(url), tag)
+            if source.name in seen_names:
+                continue
+            seen_names.add(source.name)
+            if not enforce_zyte_cooldown:
+                sources.append(source)
+            else:
+                last_success = get_source_last_success(source.name)
+                if last_success is None or time.time() - last_success >= ZYTE_FETCH_INTERVAL_SECONDS:
                     sources.append(source)
-                else:
-                    last_success = get_source_last_success(source.name)
-                    if last_success is None or time.time() - last_success >= ZYTE_FETCH_INTERVAL_SECONDS:
-                        sources.append(source)
         elif kind == "workday":
             # board_token is "host:tenant:site" (e.g. "wd5:nvidia:NVIDIAExternalCareerSite").
             board_token = str(entry.get("board_token", ""))

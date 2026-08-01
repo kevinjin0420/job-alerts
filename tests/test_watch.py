@@ -9,7 +9,9 @@ from sources.base import Listing
 from watch import (
     CLASSIFIER_HEALTH_KEY,
     SOURCE_FAILURE_ALERT_THRESHOLD,
+    _ashby_job_type_tag,
     _job_type_url,
+    _zyte_job_type_tag,
     build_job_type_sources,
     fetch_all_listings,
     passes_classifier,
@@ -70,6 +72,82 @@ class JobTypeUrlFallbackTests(unittest.TestCase):
         self.assertEqual(_job_type_url(entry, "intern"), entry["intern_url"])
         self.assertEqual(_job_type_url(entry, "fulltime"), entry["fulltime_url"])
         self.assertEqual(_job_type_url(entry, "newgrad"), entry["general_url"])
+
+
+class ZyteJobTypeTagTests(unittest.TestCase):
+    def test_shared_url_merges_into_one_tag(self) -> None:
+        # Roblox's real config: intern_url and newgrad_url point at the same page.
+        entry = {"intern_url": "https://careers.roblox.com/jobs?groups=early-career-talent",
+                  "newgrad_url": "https://careers.roblox.com/jobs?groups=early-career-talent"}
+        self.assertEqual(_zyte_job_type_tag(entry, "intern"), "intern+newgrad")
+        self.assertEqual(_zyte_job_type_tag(entry, "newgrad"), "intern+newgrad")
+
+    def test_distinct_urls_stay_separate(self) -> None:
+        entry = {"intern_url": "https://example.com/intern", "fulltime_url": "https://example.com/fulltime"}
+        self.assertEqual(_zyte_job_type_tag(entry, "intern"), "intern")
+        self.assertEqual(_zyte_job_type_tag(entry, "fulltime"), "fulltime")
+
+    def test_tag_is_independent_of_which_job_types_a_caller_actually_wants(self) -> None:
+        """Whether a caller asks only for "intern" or only for "newgrad", the tag
+        must resolve identically - otherwise a user's own source-name filtering
+        would drift out of sync with the shared fetch's merged source name."""
+        entry = {"intern_url": "https://careers.roblox.com/jobs?groups=early-career-talent",
+                  "newgrad_url": "https://careers.roblox.com/jobs?groups=early-career-talent"}
+        self.assertEqual(_zyte_job_type_tag(entry, "intern"), _zyte_job_type_tag(entry, "newgrad"))
+
+
+class AshbyJobTypeTagTests(unittest.TestCase):
+    def test_newgrad_and_fulltime_merge(self) -> None:
+        self.assertEqual(_ashby_job_type_tag("newgrad"), "fulltime+newgrad")
+        self.assertEqual(_ashby_job_type_tag("fulltime"), "fulltime+newgrad")
+
+    def test_intern_stays_separate(self) -> None:
+        self.assertEqual(_ashby_job_type_tag("intern"), "intern")
+
+
+class BuildJobTypeSourcesDedupTests(unittest.TestCase):
+    def test_zyte_shared_url_across_job_types_produces_one_source(self) -> None:
+        catalog = {
+            "roblox": {
+                "company_name": "Roblox",
+                "source_kind": "zyte",
+                "intern_url": "https://careers.roblox.com/jobs?groups=early-career-talent",
+                "newgrad_url": "https://careers.roblox.com/jobs?groups=early-career-talent",
+            }
+        }
+        pairs = {("Roblox", "intern"), ("Roblox", "newgrad")}
+        sources = build_job_type_sources(pairs, catalog, enforce_zyte_cooldown=False)
+        self.assertEqual(len(sources), 1)
+        self.assertEqual(sources[0].name, "zyte:Roblox:intern+newgrad")
+
+    def test_zyte_single_requested_job_type_still_resolves_merged_name(self) -> None:
+        """A user who only configured "newgrad" must still filter against the
+        same merged source name the shared fetch (which may include "intern" too,
+        requested by a different user) actually produced."""
+        catalog = {
+            "roblox": {
+                "company_name": "Roblox",
+                "source_kind": "zyte",
+                "intern_url": "https://careers.roblox.com/jobs?groups=early-career-talent",
+                "newgrad_url": "https://careers.roblox.com/jobs?groups=early-career-talent",
+            }
+        }
+        sources = build_job_type_sources({("Roblox", "newgrad")}, catalog, enforce_zyte_cooldown=False)
+        self.assertEqual(sources[0].name, "zyte:Roblox:intern+newgrad")
+
+    def test_ashby_newgrad_and_fulltime_produce_one_source(self) -> None:
+        catalog = {"acme": {"company_name": "Acme", "source_kind": "ashby", "board_name": "acme"}}
+        pairs = {("Acme", "newgrad"), ("Acme", "fulltime")}
+        sources = build_job_type_sources(pairs, catalog)
+        self.assertEqual(len(sources), 1)
+        self.assertEqual(sources[0].name, "ashby:Acme:fulltime+newgrad")
+
+    def test_ashby_intern_stays_distinct_from_fulltime(self) -> None:
+        catalog = {"acme": {"company_name": "Acme", "source_kind": "ashby", "board_name": "acme"}}
+        pairs = {("Acme", "intern"), ("Acme", "fulltime")}
+        sources = build_job_type_sources(pairs, catalog)
+        names = sorted(source.name for source in sources)
+        self.assertEqual(names, ["ashby:Acme:fulltime+newgrad", "ashby:Acme:intern"])
 
 
 def _listing(unique_source_id: str, company: str = "Example") -> Listing:

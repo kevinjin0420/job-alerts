@@ -53,7 +53,19 @@ from users import (
     save_user_profile,
     set_user_active,
 )
-from watch import get_job_types, get_target_companies
+
+# Deliberately not importing watch.py here - it pulls in every scraper module for two one-liners
+# that would otherwise inflate this Lambda's cold-start import graph. Keep in sync with watch.py's
+# get_target_companies/get_job_types if their config-field semantics ever change.
+DEFAULT_JOB_TYPES = ["intern"]
+
+
+def _config_string_list(config: dict[str, Any], key: str) -> list[str]:
+    raw = config.get(key, [])
+    if not isinstance(raw, list):
+        return []
+    return [str(item).strip() for item in raw if str(item).strip()]
+
 
 WATCH_LOG_GROUP = "/aws/lambda/job-alerts-watch"
 WATCH_FUNCTION_NAME = "job-alerts-watch"
@@ -413,7 +425,8 @@ def _handle_admin(method: str, path: str, event: dict[str, Any], admin_user_id: 
         for user in users:
             user.pop("api_key_hash", None)
             config = load_user_config(str(user["user_id"]))
-            user["query_count"] = len(get_target_companies(config)) * len(get_job_types(config))
+            job_types = _config_string_list(config, "job_types") or DEFAULT_JOB_TYPES
+            user["query_count"] = len(_config_string_list(config, "companies")) * len(job_types)
         return _json_response(200, {"users": users})
 
     if method == "POST" and path == "/api/admin/users":
