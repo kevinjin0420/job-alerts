@@ -88,6 +88,46 @@ class ParseLogEventRowTests(unittest.TestCase):
         self.assertEqual(event["message"], "START RequestId: abc Version: $LATEST")
 
 
+class IsFailureLineTests(unittest.TestCase):
+    """scan_summary's own "sources_failed" key contains the substring "fail" even at
+    count 0 - structured {"event": ...} lines must be judged by field, not substring."""
+
+    def test_scan_summary_with_zero_failures_is_not_a_failure(self) -> None:
+        message = '{"event": "scan_summary", "users": 7, "new": 0, "notified": 0, "dismissed": 0, "run_duration_ms": 30242, "sources_scanned": 36, "sources_failed": 0}'
+        self.assertFalse(app._is_failure_line(message))
+
+    def test_scan_summary_with_nonzero_failures_is_a_failure(self) -> None:
+        message = '{"event": "scan_summary", "sources_failed": 2}'
+        self.assertTrue(app._is_failure_line(message))
+
+    def test_source_fetch_success_is_not_a_failure(self) -> None:
+        self.assertFalse(app._is_failure_line('{"event": "source_fetch", "source": "apple", "success": true}'))
+
+    def test_source_fetch_failure_is_a_failure(self) -> None:
+        self.assertTrue(app._is_failure_line('{"event": "source_fetch", "source": "apple", "success": false}'))
+
+    def test_render_failure_event_is_always_a_failure(self) -> None:
+        self.assertTrue(app._is_failure_line('{"event": "render_failure", "url": "https://example.com"}'))
+
+    def test_render_success_event_is_not_a_failure(self) -> None:
+        self.assertFalse(app._is_failure_line('{"event": "render_success", "url": "https://example.com"}'))
+
+    def test_unrecognized_structured_event_defaults_to_not_a_failure(self) -> None:
+        self.assertFalse(app._is_failure_line('{"event": "auth_rejected", "reason": "rate_limited"}'))
+
+    def test_plain_text_failure_line_still_detected(self) -> None:
+        self.assertTrue(app._is_failure_line("Source 'apple' failed: boom"))
+
+    def test_plain_text_traceback_still_detected(self) -> None:
+        self.assertTrue(app._is_failure_line("Traceback (most recent call last):"))
+
+    def test_classifier_reason_prose_is_not_a_failure(self) -> None:
+        self.assertFalse(app._is_failure_line("User x: classifier dismissed: Acme - Intern (Fails multiple criteria)"))
+
+    def test_non_json_message_falls_back_to_substring_check(self) -> None:
+        self.assertFalse(app._is_failure_line("Scan complete: 7 user(s), 0 new"))
+
+
 class RunBoundariesTests(unittest.TestCase):
     def test_returns_request_id_and_start_epoch_newest_first(self) -> None:
         results = [

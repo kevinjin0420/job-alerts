@@ -117,6 +117,10 @@ SPA_ROOT_FILES: dict[str, bytes] = (
 FAILURE_MARKERS = ("fail", "Fail", "FAIL", "Error", "ERROR", "Traceback")
 # These lines embed the classifier's free-text reasoning, which often contains "fail"/"Error" as ordinary words (e.g. "Fails multiple criteria") - not an actual failure.
 NON_FAILURE_LINE_MARKERS = ("classifier dismissed:", "validator rejected:")
+# Structured {"event": ...} lines (scan_summary, source_fetch, etc.) carry their own explicit
+# failure signal - checked by field below instead of substring, so a JSON key name like
+# scan_summary's "sources_failed" can't trip FAILURE_MARKERS' "fail" match at count 0.
+STRUCTURED_FAILURE_EVENTS = ("render_failure",)
 
 
 def handler(event: dict[str, Any], _context: object) -> dict[str, Any]:
@@ -570,7 +574,24 @@ def _clear_failed_auth(source_ip: str) -> None:
     dynamodb_client.delete_item(TableName=AUTH_ATTEMPTS_TABLE, Key={"source_ip": {"S": source_ip}})
 
 
+def _is_structured_failure_event(event: dict[str, Any]) -> bool:
+    name = event.get("event")
+    if name in STRUCTURED_FAILURE_EVENTS:
+        return True
+    if name == "scan_summary":
+        return bool(event.get("sources_failed"))
+    if name == "source_fetch":
+        return event.get("success") is False
+    return False
+
+
 def _is_failure_line(message: str) -> bool:
+    try:
+        event = json.loads(message)
+    except (json.JSONDecodeError, TypeError):
+        event = None
+    if isinstance(event, dict) and "event" in event:
+        return _is_structured_failure_event(event)
     return not any(marker in message for marker in NON_FAILURE_LINE_MARKERS) and any(
         marker in message for marker in FAILURE_MARKERS
     )
