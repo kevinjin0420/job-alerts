@@ -82,8 +82,8 @@ echo "==> Building deployment package"
 STAGE_DIR="$(mktemp -d)"
 ZIP_PATH="$(mktemp -u /tmp/job-alerts-XXXXXX).zip"
 trap 'rm -rf "${STAGE_DIR}" "${ZIP_PATH}"' EXIT
-cp "${REPO_ROOT}/config.py" "${REPO_ROOT}/users.py" "${REPO_ROOT}/llm.py" "${REPO_ROOT}/validator.py" "${REPO_ROOT}/classifier.py" "${REPO_ROOT}/resume.py" "${REPO_ROOT}/notifiers.py" "${STAGE_DIR}/"
-cp "${REPO_ROOT}/watch/watch.py" "${STAGE_DIR}/"
+cp "${REPO_ROOT}/config.py" "${REPO_ROOT}/users.py" "${REPO_ROOT}/llm.py" "${REPO_ROOT}/resume.py" "${REPO_ROOT}/notifiers.py" "${STAGE_DIR}/"
+cp "${REPO_ROOT}/watch/watch.py" "${REPO_ROOT}/watch/classifier.py" "${REPO_ROOT}/watch/validator.py" "${STAGE_DIR}/"
 cp -r "${REPO_ROOT}/sources" "${STAGE_DIR}/sources"
 echo "==> Installing dependencies"
 pip install --target "${STAGE_DIR}" pypdf --quiet

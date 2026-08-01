@@ -12,6 +12,7 @@ from unittest.mock import patch
 os.environ.setdefault("COGNITO_USER_POOL_ID", "test-pool")
 os.environ.setdefault("COGNITO_CLIENT_ID", "test-client")
 
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "watch"))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "dashboard"))
 app = importlib.import_module("app")
 

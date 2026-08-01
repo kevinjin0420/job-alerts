@@ -6,11 +6,11 @@ import time
 import unittest
 from unittest.mock import patch
 
-from classifier import ClassificationResult
 from llm import LLMCallError
 from sources.base import Listing
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "watch"))
+from classifier import ClassificationResult
 from watch import (
     CLASSIFIER_HEALTH_KEY,
     SOURCE_FAILURE_ALERT_THRESHOLD,

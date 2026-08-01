@@ -58,7 +58,9 @@ STAGE_DIR="$(mktemp -d)"
 ZIP_PATH="$(mktemp -u /tmp/job-alerts-dashboard-XXXXXX).zip"
 trap 'rm -rf "${STAGE_DIR}" "${ZIP_PATH}"' EXIT
 cp "${REPO_ROOT}/dashboard/app.py" "${STAGE_DIR}/"
-cp "${REPO_ROOT}/config.py" "${REPO_ROOT}/users.py" "${REPO_ROOT}/llm.py" "${REPO_ROOT}/classifier.py" "${REPO_ROOT}/resume.py" "${REPO_ROOT}/notifiers.py" "${STAGE_DIR}/"
+cp "${REPO_ROOT}/config.py" "${REPO_ROOT}/users.py" "${REPO_ROOT}/llm.py" "${REPO_ROOT}/resume.py" "${REPO_ROOT}/notifiers.py" "${STAGE_DIR}/"
+# classifier.py lives in watch/ (it's watch's own module) - dashboard needs a copy for /api/test-classifier and the /api/config prompt preview.
+cp "${REPO_ROOT}/watch/classifier.py" "${STAGE_DIR}/"
 
 # ci builds from the committed lockfile; check catches what build alone would not.
 echo "==> Building frontend"

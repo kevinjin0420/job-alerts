@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import json
+import os
+import sys
 import unittest
 from unittest.mock import patch
 
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "watch"))
 from sources.base import Listing
 from validator import check_is_job_posting
 

@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import json
+import os
+import sys
 import unittest
 import urllib.error
 from unittest.mock import patch
 
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "watch"))
 from classifier import is_good_fit
 from llm import MAX_ATTEMPTS, LLMCallError
 from sources.base import Listing
