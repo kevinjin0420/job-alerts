@@ -46,11 +46,41 @@ class ReasoningTokenCapTests(unittest.TestCase):
             {"choices": [{"message": {"content": json.dumps({"is_job_posting": True, "reason": "ok"})}}], "usage": {}}
         )
         with patch("llm.urllib.request.urlopen", return_value=response) as mock_urlopen:
-            check_is_job_posting("fake-key", "fake-model", _listing())
+            with patch("validator.record_llm_call"):
+                check_is_job_posting("fake-key", "fake-model", _listing())
 
         sent_body = json.loads(mock_urlopen.call_args.args[0].data)
         self.assertEqual(sent_body["reasoning"], {"max_tokens": 150})
         self.assertGreater(sent_body["max_tokens"], 150)
+
+
+class RecordLlmCallTests(unittest.TestCase):
+    """LLM Logs page data - kept off stdout/CloudWatch, see check_is_job_posting's docstring comment above the print line."""
+
+    def test_records_full_payload_and_response(self) -> None:
+        response = _mock_response(
+            {"choices": [{"message": {"content": json.dumps({"is_job_posting": True, "reason": "looks real"})}}], "usage": {}}
+        )
+        with patch("llm.urllib.request.urlopen", return_value=response):
+            with patch("validator.record_llm_call") as mock_record:
+                check_is_job_posting("fake-key", "fake-model", _listing())
+
+        mock_record.assert_called_once()
+        kwargs = mock_record.call_args.kwargs
+        self.assertEqual(kwargs["event"], "validity_check")
+        self.assertEqual(kwargs["reason"], "looks real")
+        self.assertIn("Company: Example", kwargs["user_content"])
+
+    def test_record_failure_does_not_affect_the_returned_result(self) -> None:
+        response = _mock_response(
+            {"choices": [{"message": {"content": json.dumps({"is_job_posting": True, "reason": "looks real"})}}], "usage": {}}
+        )
+        with patch("llm.urllib.request.urlopen", return_value=response):
+            with patch("validator.record_llm_call", side_effect=RuntimeError("boom")):
+                is_job_posting, reason = check_is_job_posting("fake-key", "fake-model", _listing())
+
+        self.assertTrue(is_job_posting)
+        self.assertEqual(reason, "looks real")
 
 
 if __name__ == "__main__":

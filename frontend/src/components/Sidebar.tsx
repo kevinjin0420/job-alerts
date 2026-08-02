@@ -16,6 +16,7 @@ const USER_LINKS = [
 
 const ADMIN_LINKS = [
   { to: "/logs", label: "Logs" },
+  { to: "/llm-logs", label: "LLM Logs" },
   { to: "/sources", label: "Sources" },
   { to: "/admin", label: "Admin" },
   { to: "/activity", label: "Activity" },

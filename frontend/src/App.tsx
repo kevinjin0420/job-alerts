@@ -9,6 +9,7 @@ import { FullPageSpinner } from "./components/Skeleton";
 import { AdminPage } from "./pages/AdminPage";
 import { ConfigPage } from "./pages/ConfigPage";
 import { ListingsPage } from "./pages/ListingsPage";
+import { LlmLogsPage } from "./pages/LlmLogsPage";
 import { LogsPage } from "./pages/LogsPage";
 import { OnboardingPage } from "./pages/OnboardingPage";
 import { ProfilePage } from "./pages/ProfilePage";
@@ -37,6 +38,7 @@ export function App() {
                   <Route path="/profile" element={<ProfilePage />} />
                   <Route element={<RequireAdmin />}>
                     <Route path="/logs" element={<LogsPage />} />
+                    <Route path="/llm-logs" element={<LlmLogsPage />} />
                     <Route path="/sources" element={<SourcesPage />} />
                     <Route path="/admin" element={<AdminPage />} />
                     <Route path="/activity" element={<ActivityPage />} />

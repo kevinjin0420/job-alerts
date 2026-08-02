@@ -39,6 +39,29 @@ class OracleSourceFetchTests(unittest.TestCase):
         # still not produce a second listing.
         self.assertEqual(len(listings), 1)
 
+    def test_description_is_extracted_and_stripped_of_html(self) -> None:
+        requisitions = [
+            {
+                "Id": "1",
+                "Title": "Software Engineering Intern",
+                "PrimaryLocation": "Austin, TX",
+                "ShortDescriptionStr": "<p>Join our team.</p>",
+            }
+        ]
+        source = OracleSource("Oracle")
+        with patch("sources.oracle.fetch_url", side_effect=[_mock_response(requisitions), _mock_response([])]):
+            listings = source.fetch()
+
+        self.assertEqual(listings[0].description, "Join our team.")
+
+    def test_missing_description_stays_none(self) -> None:
+        requisitions = [{"Id": "1", "Title": "Software Engineering Intern", "PrimaryLocation": "Austin, TX"}]
+        source = OracleSource("Oracle")
+        with patch("sources.oracle.fetch_url", side_effect=[_mock_response(requisitions), _mock_response([])]):
+            listings = source.fetch()
+
+        self.assertIsNone(listings[0].description)
+
     def test_name_uses_company_name(self) -> None:
         source = OracleSource("Oracle")
         self.assertEqual(source.name, "oracle:Oracle:intern")

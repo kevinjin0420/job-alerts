@@ -4,7 +4,8 @@ import json
 import unittest
 from unittest.mock import patch
 
-from sources.render import RenderError, RenderSource
+from sources.base import RENDERED_DESCRIPTION_MAX_CHARS
+from sources.render import RenderError, RenderSource, fetch_render_description
 
 
 def _invoke_response(payload: dict[str, object], *, function_error: bool = False) -> dict[str, object]:
@@ -51,6 +52,30 @@ class RenderSourceFetchTests(unittest.TestCase):
     def test_name_uses_company_and_job_type(self) -> None:
         source = RenderSource("Example Co", "https://example.com/careers", "newgrad")
         self.assertEqual(source.name, "renderer:Example Co:newgrad")
+
+
+class FetchRenderDescriptionTests(unittest.TestCase):
+    def test_strips_html_from_rendered_page(self) -> None:
+        rendered_html = "<nav>Example</nav><main><p>Great role.</p></main>"
+        with patch("sources.render._lambda_client.invoke", return_value=_invoke_response({"html": rendered_html})):
+            description = fetch_render_description("https://example.com/job/1")
+
+        self.assertEqual(description, "Example Great role.")
+
+    def test_truncates_very_long_pages(self) -> None:
+        rendered_html = f"<p>{'x' * (RENDERED_DESCRIPTION_MAX_CHARS + 500)}</p>"
+        with patch("sources.render._lambda_client.invoke", return_value=_invoke_response({"html": rendered_html})):
+            description = fetch_render_description("https://example.com/job/1")
+
+        assert description is not None
+        self.assertEqual(len(description), RENDERED_DESCRIPTION_MAX_CHARS)
+
+    def test_function_error_returns_none_instead_of_raising(self) -> None:
+        with patch(
+            "sources.render._lambda_client.invoke",
+            return_value=_invoke_response({"errorMessage": "navigation timeout"}, function_error=True),
+        ):
+            self.assertIsNone(fetch_render_description("https://example.com/job/1"))
 
 
 if __name__ == "__main__":

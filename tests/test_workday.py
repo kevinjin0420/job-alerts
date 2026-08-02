@@ -4,7 +4,7 @@ import json
 import unittest
 from unittest.mock import patch
 
-from sources.workday import WorkdaySource
+from sources.workday import WorkdaySource, fetch_workday_description
 
 
 def _mock_response(body: dict[str, object]) -> bytes:
@@ -184,6 +184,34 @@ class WorkdaySourceFetchTests(unittest.TestCase):
     def test_name_uses_company_name_not_tenant(self) -> None:
         source = WorkdaySource("Example Co", "wd5", "example-co-tenant", "ExampleCareerSite", "intern")
         self.assertEqual(source.name, "workday:Example Co:intern")
+
+
+class FetchWorkdayDescriptionTests(unittest.TestCase):
+    LISTING_URL = "https://nvidia.wd5.myworkdayjobs.com/NVIDIAExternalCareerSite/job/US-CA-Santa-Clara/Intern_JR001"
+
+    def test_derives_detail_api_url_from_listing_url(self) -> None:
+        detail_response = _mock_response({"jobPostingInfo": {"jobDescription": "<p>We build GPUs.</p>"}})
+        with patch("sources.workday.fetch_url", return_value=detail_response) as mock_fetch_url:
+            description = fetch_workday_description(self.LISTING_URL)
+
+        requested_url = mock_fetch_url.call_args.args[1]
+        self.assertEqual(
+            requested_url,
+            "https://nvidia.wd5.myworkdayjobs.com/wday/cxs/nvidia/NVIDIAExternalCareerSite/"
+            "job/US-CA-Santa-Clara/Intern_JR001",
+        )
+        self.assertEqual(description, "We build GPUs.")
+
+    def test_missing_job_description_field_returns_none(self) -> None:
+        with patch("sources.workday.fetch_url", return_value=_mock_response({"jobPostingInfo": {}})):
+            self.assertIsNone(fetch_workday_description(self.LISTING_URL))
+
+    def test_fetch_failure_returns_none_instead_of_raising(self) -> None:
+        with patch("sources.workday.fetch_url", side_effect=RuntimeError("boom")):
+            self.assertIsNone(fetch_workday_description(self.LISTING_URL))
+
+    def test_malformed_url_returns_none_instead_of_raising(self) -> None:
+        self.assertIsNone(fetch_workday_description("not-a-url"))
 
 
 if __name__ == "__main__":

@@ -42,6 +42,7 @@ from users import (
     get_user,
     list_all_users,
     list_companies,
+    list_llm_calls,
     list_seen_listings,
     list_source_health,
     load_user_config,
@@ -246,6 +247,13 @@ def handler(event: dict[str, Any], _context: object) -> dict[str, Any]:
             count = int(params.get("count", DEFAULT_RUNS_PAGE_SIZE))
             return _json_response(200, _fetch_runs_page(log_group, before, count))
         return _json_response(200, {"events": _recent_log_events(log_group)})
+    if method == "GET" and path == "/api/llm-logs":
+        if not is_admin:
+            return _json_response(403, {"error": "admin only"})
+        params = event.get("queryStringParameters") or {}
+        before = params.get("before") or None
+        events, next_cursor = list_llm_calls(before, LLM_LOG_PAGE_LIMIT)
+        return _json_response(200, {"events": events, "next_cursor": next_cursor})
     if method == "GET" and path == "/api/metrics":
         params = event.get("queryStringParameters") or {}
         range_key = params.get("range", DEFAULT_METRICS_RANGE)
@@ -854,6 +862,7 @@ DEFAULT_RUNS_PAGE_SIZE = 5
 RUN_LOOKBACK_MINUTES = METRICS_RANGE_PRESETS_MINUTES["1w"]
 SEARCH_PAGE_LIMIT = 200
 SEARCH_LOOKBACK_MINUTES = METRICS_RANGE_PRESETS_MINUTES["1w"]
+LLM_LOG_PAGE_LIMIT = 50
 
 
 def _metric_period_seconds(window_seconds: int) -> int:

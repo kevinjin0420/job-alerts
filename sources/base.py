@@ -14,6 +14,10 @@ INTERNSHIP_TITLE_PATTERN = re.compile(r"\bintern(s|ship)?\b", re.IGNORECASE)
 _ANCHOR_PATTERN = re.compile(r'<a\s+[^>]*href="([^"]+)"[^>]*>(.*?)</a>', re.IGNORECASE | re.DOTALL)
 _HEADING_PATTERN = re.compile(r"<h[1-6][^>]*>(.*?)</h[1-6]>", re.IGNORECASE | re.DOTALL)
 _TAG_PATTERN = re.compile(r"<[^>]+>")
+# <script>/<style> tags get stripped by _TAG_PATTERN below, but their *contents* (raw JS/CSS
+# text) aren't inside another tag, so they'd survive as visible "text" - a full rendered page's
+# <head> is full of both, unlike the small description snippets Amazon/Oracle/Greenhouse return.
+_SCRIPT_OR_STYLE_BLOCK_PATTERN = re.compile(r"<(script|style)\b[^>]*>.*?</\1>", re.IGNORECASE | re.DOTALL)
 _MIN_TITLE_LENGTH = 4
 
 
@@ -40,11 +44,25 @@ class Listing:
         return ", ".join(self.locations) if self.locations else "Location not specified"
 
 
+def strip_html(text: str) -> str:
+    """Collapses tags/entities down to plain text - shared by anchor-title extraction
+    and any description scraped as raw HTML (Greenhouse/Oracle/Amazon/Workday/zyte/render).
+    script/style block contents must go first, or their raw JS/CSS survives as "text"."""
+    without_script_or_style = _SCRIPT_OR_STYLE_BLOCK_PATTERN.sub(" ", text)
+    return " ".join(html.unescape(_TAG_PATTERN.sub(" ", without_script_or_style)).split())
+
+
+# zyte/render have no structured description field to pull from, unlike a JSON API - the
+# full rendered detail page (nav/footer text included, not just the posting) gets stripped
+# to text instead. Capped so one unusually large/noisy page can't blow up a classifier prompt.
+RENDERED_DESCRIPTION_MAX_CHARS = 4000
+
+
 def _extract_anchor_title(anchor_inner_html: str) -> str:
     """Card-style SPAs (e.g. Meta) nest the title in a heading rather than as the anchor's direct text - prefer that when present."""
     heading_match = _HEADING_PATTERN.search(anchor_inner_html)
     text = heading_match.group(1) if heading_match else anchor_inner_html
-    return " ".join(html.unescape(_TAG_PATTERN.sub(" ", text)).split())
+    return strip_html(text)
 
 
 def parse_rendered_html_listings(rendered_html: str, base_url: str, company_name: str, source_name: str) -> list[Listing]:

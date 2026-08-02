@@ -164,6 +164,26 @@ export interface LogSearchPage {
   next_cursor: number | null;
 }
 
+export interface LlmLogEvent {
+  event: "classifier_call" | "validity_check";
+  model: string;
+  user_id?: string | null;
+  fit?: boolean;
+  is_job_posting?: boolean;
+  fit_score?: number | null;
+  input_tokens: number;
+  output_tokens: number;
+  system_content: string;
+  user_content: string;
+  reason: string;
+  created_at: number;
+}
+
+export interface LlmLogPage {
+  events: LlmLogEvent[];
+  next_cursor: string | null;
+}
+
 export interface AdminUser {
   user_id: string;
   email?: string;

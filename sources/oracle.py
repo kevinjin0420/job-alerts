@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import urllib.parse
 
-from .base import INTERNSHIP_TITLE_PATTERN, Listing, fetch_url
+from .base import INTERNSHIP_TITLE_PATTERN, Listing, fetch_url, strip_html
 
 REQUISITIONS_URL = "https://eeho.fa.us2.oraclecloud.com/hcmRestApi/resources/latest/recruitingCEJobRequisitions"
 JOB_URL_TEMPLATE = "https://careers.oracle.com/jobs/#en/sites/jobsearch/job/{id}"
@@ -49,6 +49,7 @@ class OracleSource:
                     continue
                 seen_ids.add(req_id)
                 location = str(req.get("PrimaryLocation", ""))
+                description = str(req.get("ShortDescriptionStr") or "")
                 matches.append(
                     Listing(
                         source=self.name,
@@ -57,6 +58,7 @@ class OracleSource:
                         title=title,
                         locations=[location] if location else [],
                         url=JOB_URL_TEMPLATE.format(id=req_id),
+                        description=strip_html(description) or None,
                     )
                 )
         return matches

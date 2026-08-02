@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import urllib.parse
 
-from .base import Listing, fetch_url
+from .base import Listing, fetch_url, strip_html
 
 SEARCH_URL = "https://www.amazon.jobs/en/search.json"
 REQUEST_TIMEOUT_SECONDS = 30
@@ -41,6 +41,7 @@ class AmazonJobsSource:
             if not job_id or not job_path:
                 continue
             location = str(job.get("normalized_location") or job.get("location") or "")
+            description = str(job.get("description") or "")
             matches.append(
                 Listing(
                     source=self.name,
@@ -49,6 +50,7 @@ class AmazonJobsSource:
                     title=str(job.get("title", "")),
                     locations=[location] if location else [],
                     url=f"https://www.amazon.jobs{job_path}",
+                    description=strip_html(description) or None,
                 )
             )
         return matches

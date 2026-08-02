@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import secrets
 import time
+import uuid
 from typing import Any
 
 import boto3
@@ -18,6 +19,9 @@ SOURCE_HEALTH_TABLE = "job-alerts-source-health"
 USER_PROFILE_TABLE = "job-alerts-user-profile"
 SETTINGS_TABLE = "job-alerts-settings"
 LISTING_VALIDITY_TABLE = "job-alerts-listing-validity"
+LISTING_DESCRIPTION_TABLE = "job-alerts-listing-description"
+LLM_CALL_LOG_TABLE = "job-alerts-llm-call-log"
+LLM_CALL_LOG_TTL_SECONDS = 30 * 24 * 60 * 60
 DEFAULT_LLM_MODEL = "openai/gpt-oss-120b"
 
 _dynamodb = boto3.client("dynamodb")
@@ -143,6 +147,61 @@ def save_listing_validity(listing_id: str, *, is_job_posting: bool, reason: str)
             }
         ),
     )
+
+
+def get_listing_description(listing_id: str) -> str | None:
+    """Cached forever, same as listing validity - unlike validity this isn't an LLM
+    call, but it's still a real network round trip per listing (see
+    watch.resolve_listing_descriptions), and a listing can stay "new to someone"
+    across several runs before every active user has seen it."""
+    response = _dynamodb.get_item(TableName=LISTING_DESCRIPTION_TABLE, Key={"listing_id": {"S": listing_id}})
+    item = response.get("Item")
+    return str(item["description"]["S"]) if item and "description" in item else None
+
+
+def save_listing_description(listing_id: str, description: str) -> None:
+    """description="" is a valid, cached result - a listing with no description
+    (fetch failed, or the source genuinely has none) must not be re-fetched every run."""
+    _dynamodb.put_item(
+        TableName=LISTING_DESCRIPTION_TABLE,
+        Item=_wrap_item({"listing_id": listing_id, "description": description, "checked_at": int(time.time())}),
+    )
+
+
+def record_llm_call(**fields: Any) -> None:
+    """Full request/response for the LLM Logs page - deliberately NOT on stdout/CloudWatch
+    like classifier_call/validity_check's small metrics print lines, so this doesn't add to
+    the general Logs page or CloudWatch volume. shard is a single fixed partition - fine at
+    current call volume; split by day if this table's write throughput ever needs it."""
+    now = int(time.time())
+    item = {
+        **fields,
+        "shard": "llm",
+        "sort_key": f"{int(time.time() * 1000):013d}#{uuid.uuid4().hex[:8]}",
+        "created_at": now,
+        "ttl": now + LLM_CALL_LOG_TTL_SECONDS,
+    }
+    _dynamodb.put_item(
+        TableName=LLM_CALL_LOG_TABLE, Item=_wrap_item({key: value for key, value in item.items() if value is not None})
+    )
+
+
+def list_llm_calls(before: str | None, limit: int) -> tuple[list[dict[str, Any]], str | None]:
+    kwargs: dict[str, Any] = {
+        "TableName": LLM_CALL_LOG_TABLE,
+        # "shard" is a DynamoDB reserved keyword - can't appear bare in a KeyConditionExpression.
+        "KeyConditionExpression": "#shard = :s",
+        "ExpressionAttributeNames": {"#shard": "shard"},
+        "ExpressionAttributeValues": {":s": {"S": "llm"}},
+        "ScanIndexForward": False,
+        "Limit": limit,
+    }
+    if before:
+        kwargs["ExclusiveStartKey"] = {"shard": {"S": "llm"}, "sort_key": {"S": before}}
+    response = _dynamodb.query(**kwargs)
+    items = [_unwrap_item(item) for item in response.get("Items", [])]
+    next_cursor = response["LastEvaluatedKey"]["sort_key"]["S"] if "LastEvaluatedKey" in response else None
+    return items, next_cursor
 
 
 def list_all_users() -> list[dict[str, Any]]:

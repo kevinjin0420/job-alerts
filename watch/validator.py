@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 import json
+import sys
 
 from llm import call_openrouter
 from sources.base import Listing
+from users import record_llm_call
 
 
 def check_is_job_posting(api_key: str, model: str, listing: Listing) -> tuple[bool, str]:
@@ -51,4 +53,22 @@ def check_is_job_posting(api_key: str, model: str, listing: Listing) -> tuple[bo
             }
         )
     )
+
+    # Full payload/response for the LLM Logs page - kept off stdout/CloudWatch (see the
+    # small print above for the metrics version). Best-effort: a DynamoDB hiccup here
+    # must never fail an actual validity check.
+    try:
+        record_llm_call(
+            event="validity_check",
+            model=model,
+            is_job_posting=is_job_posting,
+            input_tokens=int(usage.get("prompt_tokens", 0)),
+            output_tokens=int(usage.get("completion_tokens", 0)),
+            system_content=system_content,
+            user_content=listing_text,
+            reason=reason,
+        )
+    except Exception as error:
+        print(f"record_llm_call failed: {error}", file=sys.stderr)
+
     return is_job_posting, reason

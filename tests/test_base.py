@@ -10,6 +10,7 @@ from sources.base import (
     fetch_url,
     looks_like_job_posting_url,
     parse_rendered_html_listings,
+    strip_html,
 )
 
 
@@ -154,6 +155,28 @@ class ExtractAnchorTitleTests(unittest.TestCase):
     def test_falls_back_to_full_text_without_heading(self) -> None:
         html = "<span>Data Engineer</span> <span>Intern</span>"
         self.assertEqual(_extract_anchor_title(html), "Data Engineer Intern")
+
+
+class StripHtmlTests(unittest.TestCase):
+    def test_strips_tags_and_collapses_whitespace(self) -> None:
+        html = "<p>Who we are</p>\n<p>Stripe is a  financial\ninfrastructure platform.</p>"
+        self.assertEqual(strip_html(html), "Who we are Stripe is a financial infrastructure platform.")
+
+    def test_decodes_entities(self) -> None:
+        self.assertEqual(strip_html("<p>Engineering &amp; Product</p>"), "Engineering & Product")
+
+    def test_empty_input_returns_empty_string(self) -> None:
+        self.assertEqual(strip_html(""), "")
+
+    def test_style_block_contents_are_removed_not_just_the_tags(self) -> None:
+        # Regression: a real Tesla page's <style> block CSS survived as "text" until this
+        # was added - the tag-stripper alone only removes the <style> tags, not their contents.
+        html = "<head><style>.cookie-banner{width:calc(100% - 2px)}</style></head><body><p>Great role.</p></body>"
+        self.assertEqual(strip_html(html), "Great role.")
+
+    def test_script_block_contents_are_removed_not_just_the_tags(self) -> None:
+        html = '<script>window.dataLayer = window.dataLayer || [];</script><p>Great role.</p>'
+        self.assertEqual(strip_html(html), "Great role.")
 
 
 class ParseRenderedHtmlListingsTests(unittest.TestCase):

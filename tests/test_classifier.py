@@ -46,7 +46,8 @@ class FitScoreClampingTests(unittest.TestCase):
             }
         )
         with patch("llm.urllib.request.urlopen", return_value=response) as mock_urlopen:
-            result = is_good_fit("fake-key", "fake-model", "must be remote", _listing(), resume_text="resume text")
+            with patch("classifier.record_llm_call"):
+                result = is_good_fit("fake-key", "fake-model", "must be remote", _listing(), resume_text="resume text")
 
         self.assertEqual(result.fit_score, 100)
         sent_body = json.loads(mock_urlopen.call_args.args[0].data)
@@ -62,7 +63,8 @@ class FitScoreClampingTests(unittest.TestCase):
             }
         )
         with patch("llm.urllib.request.urlopen", return_value=response):
-            result = is_good_fit("fake-key", "fake-model", "must be remote", _listing(), resume_text="resume text")
+            with patch("classifier.record_llm_call"):
+                result = is_good_fit("fake-key", "fake-model", "must be remote", _listing(), resume_text="resume text")
 
         self.assertEqual(result.fit_score, 0)
 
@@ -74,9 +76,40 @@ class FitScoreClampingTests(unittest.TestCase):
             }
         )
         with patch("llm.urllib.request.urlopen", return_value=response):
-            result = is_good_fit("fake-key", "fake-model", "must be remote", _listing(), resume_text="resume text")
+            with patch("classifier.record_llm_call"):
+                result = is_good_fit("fake-key", "fake-model", "must be remote", _listing(), resume_text="resume text")
 
         self.assertEqual(result.fit_score, 72)
+
+
+class RecordLlmCallTests(unittest.TestCase):
+    """LLM Logs page data - kept off stdout/CloudWatch, see is_good_fit's docstring comment above the print line."""
+
+    def test_records_full_payload_and_response(self) -> None:
+        response = _mock_response(
+            {"choices": [{"message": {"content": json.dumps({"fits": True, "reason": "great match"})}}], "usage": {}}
+        )
+        with patch("llm.urllib.request.urlopen", return_value=response):
+            with patch("classifier.record_llm_call") as mock_record:
+                is_good_fit("fake-key", "fake-model", "must be remote", _listing())
+
+        mock_record.assert_called_once()
+        kwargs = mock_record.call_args.kwargs
+        self.assertEqual(kwargs["event"], "classifier_call")
+        self.assertEqual(kwargs["reason"], "great match")
+        self.assertIn("Company: Example", kwargs["user_content"])
+        self.assertIn("must be remote", kwargs["system_content"])
+
+    def test_record_failure_does_not_affect_the_returned_result(self) -> None:
+        response = _mock_response(
+            {"choices": [{"message": {"content": json.dumps({"fits": True, "reason": "great match"})}}], "usage": {}}
+        )
+        with patch("llm.urllib.request.urlopen", return_value=response):
+            with patch("classifier.record_llm_call", side_effect=RuntimeError("boom")):
+                result = is_good_fit("fake-key", "fake-model", "must be remote", _listing())
+
+        self.assertTrue(result.fits)
+        self.assertEqual(result.reason, "great match")
 
 
 if __name__ == "__main__":

@@ -19,6 +19,7 @@ import type {
   ConfigOptions,
   CurrentUser,
   ListingsResponse,
+  LlmLogPage,
   LogRunsPage,
   LogSearchPage,
   LogsResponse,
@@ -41,6 +42,7 @@ export const queryKeys = {
   logs: (lambdaKey: string) => ["logs", lambdaKey] as const,
   logRuns: (lambdaKey: string) => ["logs", "runs", lambdaKey] as const,
   logSearch: (query: string, lambdaKey: string) => ["logs", "search", lambdaKey, query] as const,
+  llmLogs: ["llm-logs"] as const,
   adminUsers: ["admin", "users"] as const,
   adminSettings: ["admin", "settings"] as const,
   adminCompanies: ["admin", "companies"] as const,
@@ -145,6 +147,16 @@ export function useLogSearch(query: string, lambdaKey: string): UseInfiniteQuery
     initialPageParam: null as number | null,
     getNextPageParam: (lastPage) => lastPage.next_cursor,
     enabled: query.trim().length > 0,
+  });
+}
+
+export function useLlmLogs(): UseInfiniteQueryResult<InfiniteData<LlmLogPage>, Error> {
+  return useInfiniteQuery({
+    queryKey: queryKeys.llmLogs,
+    queryFn: ({ pageParam }) =>
+      apiRequest<LlmLogPage>(`/api/llm-logs${pageParam !== null ? `?before=${encodeURIComponent(pageParam)}` : ""}`),
+    initialPageParam: null as string | null,
+    getNextPageParam: (lastPage) => lastPage.next_cursor,
   });
 }
 

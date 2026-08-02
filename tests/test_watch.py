@@ -29,6 +29,7 @@ from watch import (
     main,
     passes_classifier,
     process_user,
+    resolve_listing_descriptions,
     resolve_listing_validity,
 )
 
@@ -182,6 +183,30 @@ def _listing(unique_source_id: str, company: str = "Example") -> Listing:
         title=f"Intern {unique_source_id}",
         locations=["Remote"],
         url=f"https://example.com/jobs/{unique_source_id}",
+    )
+
+
+def _workday_listing(unique_source_id: str, description: str | None = None) -> Listing:
+    return Listing(
+        source="workday:Example:intern",
+        id=unique_source_id,
+        company_name="Example",
+        title=f"Intern {unique_source_id}",
+        locations=["Remote"],
+        url=f"https://example.wd5.myworkdayjobs.com/ExampleCareerSite/job/Intern_{unique_source_id}",
+        description=description,
+    )
+
+
+def _rendered_listing(kind: str, unique_source_id: str, description: str | None = None) -> Listing:
+    return Listing(
+        source=f"{kind}:Example:intern",
+        id=unique_source_id,
+        company_name="Example",
+        title=f"Intern {unique_source_id}",
+        locations=["Remote"],
+        url=f"https://example.com/jobs/{unique_source_id}",
+        description=description,
     )
 
 
@@ -488,6 +513,85 @@ class MainUserLoopTests(unittest.TestCase):
         self.assertEqual(summary["notified"], 1)
         self.assertEqual(summary["dismissed"], 4)
         self.assertEqual(exit_code, 1)
+
+
+class ResolveListingDescriptionsTests(unittest.TestCase):
+    def test_cached_description_is_applied_without_fetching(self) -> None:
+        listing = _workday_listing("1")
+        with patch("watch.get_listing_description", return_value="cached description"):
+            with patch("watch.fetch_workday_description") as mock_fetch:
+                enriched = resolve_listing_descriptions([listing])
+
+        mock_fetch.assert_not_called()
+        self.assertEqual(enriched[0].description, "cached description")
+
+    def test_uncached_listings_are_fetched_and_cached(self) -> None:
+        listings = [_workday_listing(str(i)) for i in range(3)]
+        with patch("watch.get_listing_description", return_value=None):
+            with patch("watch.fetch_workday_description", return_value="fresh description") as mock_fetch:
+                with patch("watch.save_listing_description") as mock_save:
+                    enriched = resolve_listing_descriptions(listings)
+
+        self.assertEqual(mock_fetch.call_count, 3)
+        self.assertEqual(mock_save.call_count, 3)
+        for listing in enriched:
+            self.assertEqual(listing.description, "fresh description")
+
+    def test_listings_with_no_registered_fetcher_are_skipped_entirely(self) -> None:
+        listing = _listing("1")  # source="direct" - not in resolve_listing_descriptions' dispatch
+        with patch("watch.get_listing_description") as mock_get:
+            enriched = resolve_listing_descriptions([listing])
+
+        mock_get.assert_not_called()
+        self.assertEqual(enriched, [listing])
+
+    def test_zyte_listings_dispatch_to_fetch_zyte_description(self) -> None:
+        listing = _rendered_listing("zyte", "1")
+        with patch("watch.get_listing_description", return_value=None):
+            with patch("watch.fetch_zyte_description", return_value="zyte description") as mock_fetch:
+                with patch("watch.fetch_workday_description") as mock_workday_fetch:
+                    with patch("watch.save_listing_description"):
+                        enriched = resolve_listing_descriptions([listing])
+
+        mock_fetch.assert_called_once_with(listing.url)
+        mock_workday_fetch.assert_not_called()
+        self.assertEqual(enriched[0].description, "zyte description")
+
+    def test_renderer_listings_dispatch_to_fetch_render_description(self) -> None:
+        listing = _rendered_listing("renderer", "1")
+        with patch("watch.get_listing_description", return_value=None):
+            with patch("watch.fetch_render_description", return_value="render description") as mock_fetch:
+                with patch("watch.save_listing_description"):
+                    enriched = resolve_listing_descriptions([listing])
+
+        mock_fetch.assert_called_once_with(listing.url)
+        self.assertEqual(enriched[0].description, "render description")
+
+    def test_listings_that_already_have_a_description_are_skipped(self) -> None:
+        listing = _workday_listing("1", description="already have one")
+        with patch("watch.get_listing_description") as mock_get:
+            resolve_listing_descriptions([listing])
+
+        mock_get.assert_not_called()
+
+    def test_duplicate_unique_ids_are_only_fetched_once(self) -> None:
+        listing = _workday_listing("1")
+        with patch("watch.get_listing_description", return_value=None):
+            with patch("watch.fetch_workday_description", return_value="d") as mock_fetch:
+                with patch("watch.save_listing_description"):
+                    resolve_listing_descriptions([listing, listing, listing])
+
+        mock_fetch.assert_called_once()
+
+    def test_failed_fetch_caches_empty_string_and_listing_keeps_no_description(self) -> None:
+        listing = _workday_listing("1")
+        with patch("watch.get_listing_description", return_value=None):
+            with patch("watch.fetch_workday_description", return_value=None):
+                with patch("watch.save_listing_description") as mock_save:
+                    enriched = resolve_listing_descriptions([listing])
+
+        mock_save.assert_called_once_with(listing.unique_id, "")
+        self.assertIsNone(enriched[0].description)
 
 
 class ResolveListingValidityTests(unittest.TestCase):

@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import json
+import sys
 from dataclasses import dataclass
 
 from llm import MAX_ATTEMPTS, REQUEST_TIMEOUT_SECONDS, call_openrouter
 from sources.base import Listing
+from users import record_llm_call
 
 # Kept out of fit_prompt so users write only criteria - app.py exposes these via GET /api/config for an exact-prompt preview.
 FIT_SYSTEM_PREAMBLE = (
@@ -98,5 +100,24 @@ def is_good_fit(
             }
         )
     )
+
+    # Full payload/response for the LLM Logs page - kept off stdout/CloudWatch (see the
+    # small print above for the metrics version) so this doesn't clutter the general Logs
+    # page. Best-effort: a DynamoDB hiccup here must never fail an actual classification.
+    try:
+        record_llm_call(
+            event="classifier_call",
+            model=model,
+            user_id=user_id,
+            fit=result.fits,
+            fit_score=result.fit_score,
+            input_tokens=int(usage.get("prompt_tokens", 0)),
+            output_tokens=int(usage.get("completion_tokens", 0)),
+            system_content=system_content,
+            user_content=listing_text,
+            reason=result.reason,
+        )
+    except Exception as error:
+        print(f"record_llm_call failed: {error}", file=sys.stderr)
 
     return result

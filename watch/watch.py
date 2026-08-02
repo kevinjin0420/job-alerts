@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import concurrent.futures
+import dataclasses
 import json
 import os
 import sys
@@ -20,11 +21,12 @@ from sources.amazon import QUERY_BY_JOB_TYPE as AMAZON_QUERY_BY_JOB_TYPE
 from sources.amazon import AmazonJobsSource
 from sources.ashby import EMPLOYMENT_TYPE_BY_JOB_TYPE, AshbySource
 from sources.oracle import OracleSource
-from sources.render import RenderSource
+from sources.render import RenderSource, fetch_render_description
 from sources.sitemap import SitemapSource
-from sources.workday import WorkdaySource
-from sources.zyte import ZyteSource
+from sources.workday import WorkdaySource, fetch_workday_description
+from sources.zyte import ZyteSource, fetch_zyte_description
 from users import (
+    get_listing_description,
     get_listing_validity,
     get_llm_model,
     get_source_last_success,
@@ -39,6 +41,7 @@ from users import (
     record_listings,
     record_source_failure,
     record_source_success,
+    save_listing_description,
     save_listing_validity,
 )
 from validator import check_is_job_posting
@@ -320,6 +323,62 @@ def _check_listing_validity(
         print(f"validator rejected: {listing.company_name} - {listing.title} ({reason}) [validator: {llm_model}]")
     save_listing_validity(listing.unique_id, is_job_posting=is_job_posting, reason=reason)
     return is_job_posting, reason
+
+
+def resolve_listing_descriptions(all_listings: list[Listing]) -> list[Listing]:
+    """Checked once per listing (shared across users, same as resolve_listing_validity)
+    and cached forever in DynamoDB, since a listing can stay "new to someone" across
+    several runs before every active user has seen it.
+
+    Amazon/Oracle/Greenhouse capture their description straight out of the same list
+    response they already fetch (see those sources' own fetch()) - these three kinds have
+    no such field and genuinely need a second per-listing request, dispatched here by kind.
+
+    Cache lookups run sequentially (cheap DynamoDB reads); only cache-miss listings go
+    to a thread pool, on the fetch concurrency budget since this is plain HTTP I/O, not
+    an LLM call.
+    """
+    # Built fresh per call (not module-level) so tests patching watch.fetch_workday_description
+    # et al. take effect - a module-level dict would freeze the original function references.
+    fetchers_by_kind = {
+        "workday": fetch_workday_description,
+        "zyte": fetch_zyte_description,
+        "renderer": fetch_render_description,
+    }
+    seen_ids: set[str] = set()
+    uncached: list[tuple[Listing, Any]] = []
+    fetched: dict[str, str] = {}
+    for listing in all_listings:
+        if listing.description or listing.unique_id in seen_ids:
+            continue
+        fetcher = fetchers_by_kind.get(listing.source.split(":", 1)[0])
+        if fetcher is None:
+            continue
+        seen_ids.add(listing.unique_id)
+        cached = get_listing_description(listing.unique_id)
+        if cached is None:
+            uncached.append((listing, fetcher))
+        elif cached:
+            fetched[listing.unique_id] = cached
+
+    if uncached:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=FETCH_CONCURRENCY) as executor:
+            futures = {executor.submit(fetcher, listing.url): listing for listing, fetcher in uncached}
+            for future in concurrent.futures.as_completed(futures):
+                listing = futures[future]
+                description = future.result() or ""
+                save_listing_description(listing.unique_id, description)
+                if description:
+                    fetched[listing.unique_id] = description
+
+    if not fetched:
+        return all_listings
+    return [
+        dataclasses.replace(listing, description=fetched[listing.unique_id])
+        if listing.unique_id in fetched
+        else listing
+        for listing in all_listings
+    ]
 
 
 def resolve_listing_validity(
@@ -606,6 +665,10 @@ def main() -> int:
     newly_unhealthy_lambdas = check_lambda_health()
     if newly_unhealthy_lambdas:
         alert_admins_lambda_failing(newly_unhealthy_lambdas, smtp_user, smtp_pass)
+
+    # Before validity/classification below, so both see real description text instead
+    # of "not available" for workday-sourced listings - see resolve_listing_descriptions's docstring.
+    all_listings = resolve_listing_descriptions(all_listings)
 
     # Checked once here, shared across every user - see resolve_listing_validity's docstring.
     listing_validity = resolve_listing_validity(all_listings, openrouter_api_key, llm_model)

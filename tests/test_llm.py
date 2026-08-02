@@ -50,7 +50,8 @@ class RetryWithBackoffTests(unittest.TestCase):
             side_effect=[urllib.error.HTTPError("https://openrouter.ai", 429, "busy", {}, None), good_response],
         ) as mock_urlopen:
             with patch("llm.time.sleep") as mock_sleep:
-                result = is_good_fit("fake-key", "fake-model", "must be remote", _listing())
+                with patch("classifier.record_llm_call"):
+                    result = is_good_fit("fake-key", "fake-model", "must be remote", _listing())
 
         self.assertTrue(result.fits)
         self.assertEqual(mock_urlopen.call_count, 2)

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import json
+import urllib.parse
 from typing import Any
 
-from .base import Listing, fetch_url
+from .base import Listing, fetch_url, strip_html
 
 REQUEST_TIMEOUT_SECONDS = 30
 PAGE_SIZE = 20  # Workday's public CXS API silently 400s above this, regardless of the requested limit.
@@ -100,3 +101,35 @@ class WorkdaySource:
             if len(postings) < PAGE_SIZE or len(matches) >= total:
                 break
         return matches
+
+
+def fetch_workday_description(listing_url: str) -> str | None:
+    """The list API above never includes a description - only the per-job CXS detail
+    endpoint does. tenant/site/external_path are all recoverable from the listing's own
+    public URL (https://{tenant}.{host}.myworkdayjobs.com/{site}{external_path}) instead
+    of threading extra Workday-specific state through the generic Listing type.
+
+    Best-effort: any failure here (malformed URL, network error, missing field) just
+    means this listing keeps no description, same as before this function existed -
+    never worth blocking or crashing a run over."""
+    try:
+        parsed = urllib.parse.urlparse(listing_url)
+        if not parsed.hostname:
+            return None
+        tenant = parsed.hostname.split(".")[0]
+        path_parts = parsed.path.lstrip("/").split("/", 1)
+        if len(path_parts) != 2:
+            return None
+        site, external_path = path_parts
+        api_url = f"https://{parsed.hostname}/wday/cxs/{tenant}/{site}/{external_path}"
+        body = fetch_url(
+            f"workday-description:{tenant}",
+            api_url,
+            headers={"User-Agent": "job-alerts-watcher"},
+            timeout=REQUEST_TIMEOUT_SECONDS,
+        )
+        payload = json.loads(body)
+        description = payload.get("jobPostingInfo", {}).get("jobDescription", "")
+        return strip_html(str(description)) or None
+    except Exception:  # best-effort enrichment - a broken fetch must not block the listing
+        return None
