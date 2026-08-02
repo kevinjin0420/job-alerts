@@ -317,12 +317,16 @@ def find_user_by_api_key(token: str) -> dict[str, Any] | None:
 
 
 def list_companies() -> list[dict[str, Any]]:
+    """Alphabetical, case-insensitive - a plain scan's order is arbitrary (DynamoDB's
+    internal partition layout, not insertion order), which made both the admin Sources
+    page and the user-facing company picker in ConfigPage hard to scan for one company."""
     companies: list[dict[str, Any]] = []
     kwargs: dict[str, Any] = {"TableName": COMPANIES_TABLE}
     while True:
         response = _dynamodb.scan(**kwargs)
         companies.extend(_unwrap_item(item) for item in response.get("Items", []))
         if "LastEvaluatedKey" not in response:
+            companies.sort(key=lambda entry: str(entry.get("company_name", "")).lower())
             return companies
         kwargs["ExclusiveStartKey"] = response["LastEvaluatedKey"]
 
