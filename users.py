@@ -160,8 +160,9 @@ def get_listing_description(listing_id: str) -> str | None:
 
 
 def save_listing_description(listing_id: str, description: str) -> None:
-    """description="" is a valid, cached result - a listing with no description
-    (fetch failed, or the source genuinely has none) must not be re-fetched every run."""
+    """Only call this with a real, successfully-fetched description - callers must not
+    cache a fetch failure (429, timeout, transient renderer contention) as "", or the
+    listing is black-holed forever even after the source recovers on a later run."""
     _dynamodb.put_item(
         TableName=LISTING_DESCRIPTION_TABLE,
         Item=_wrap_item({"listing_id": listing_id, "description": description, "checked_at": int(time.time())}),
@@ -186,7 +187,7 @@ def record_llm_call(**fields: Any) -> None:
     )
 
 
-def list_llm_calls(before: str | None, limit: int) -> tuple[list[dict[str, Any]], str | None]:
+def list_llm_calls(before: str | None, limit: int, event_filter: str | None = None) -> tuple[list[dict[str, Any]], str | None]:
     kwargs: dict[str, Any] = {
         "TableName": LLM_CALL_LOG_TABLE,
         # "shard" is a DynamoDB reserved keyword - can't appear bare in a KeyConditionExpression.
@@ -196,6 +197,12 @@ def list_llm_calls(before: str | None, limit: int) -> tuple[list[dict[str, Any]]
         "ScanIndexForward": False,
         "Limit": limit,
     }
+    if event_filter:
+        # Filter is applied after the Limit'd query, so a filtered page can come back
+        # smaller than `limit` (or empty) even when more matching items exist further back.
+        kwargs["FilterExpression"] = "#event = :event"
+        kwargs["ExpressionAttributeNames"]["#event"] = "event"
+        kwargs["ExpressionAttributeValues"][":event"] = {"S": event_filter}
     if before:
         kwargs["ExclusiveStartKey"] = {"shard": {"S": "llm"}, "sort_key": {"S": before}}
     response = _dynamodb.query(**kwargs)

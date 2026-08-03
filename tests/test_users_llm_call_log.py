@@ -44,6 +44,21 @@ class ListLlmCallsQueryTests(unittest.TestCase):
 
         self.assertIsNone(next_cursor)
 
+    def test_event_filter_adds_filter_expression(self) -> None:
+        with patch.object(users._dynamodb, "query", return_value={"Items": []}) as mock_query:
+            users.list_llm_calls(None, 50, event_filter="validity_check")
+
+        kwargs = mock_query.call_args.kwargs
+        self.assertEqual(kwargs["FilterExpression"], "#event = :event")
+        self.assertEqual(kwargs["ExpressionAttributeNames"]["#event"], "event")
+        self.assertEqual(kwargs["ExpressionAttributeValues"][":event"], {"S": "validity_check"})
+
+    def test_no_event_filter_omits_filter_expression(self) -> None:
+        with patch.object(users._dynamodb, "query", return_value={"Items": []}) as mock_query:
+            users.list_llm_calls(None, 50)
+
+        self.assertNotIn("FilterExpression", mock_query.call_args.kwargs)
+
 
 class RecordLlmCallTests(unittest.TestCase):
     def test_writes_item_with_shard_and_sort_key(self) -> None:

@@ -583,14 +583,14 @@ class ResolveListingDescriptionsTests(unittest.TestCase):
 
         mock_fetch.assert_called_once()
 
-    def test_failed_fetch_caches_empty_string_and_listing_keeps_no_description(self) -> None:
+    def test_failed_fetch_is_not_cached_so_a_later_run_can_retry(self) -> None:
         listing = _workday_listing("1")
         with patch("watch.get_listing_description", return_value=None):
             with patch("watch.fetch_workday_description", return_value=None):
                 with patch("watch.save_listing_description") as mock_save:
                     enriched = resolve_listing_descriptions([listing])
 
-        mock_save.assert_called_once_with(listing.unique_id, "")
+        mock_save.assert_not_called()
         self.assertIsNone(enriched[0].description)
 
 

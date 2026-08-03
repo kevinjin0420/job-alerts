@@ -252,7 +252,8 @@ def handler(event: dict[str, Any], _context: object) -> dict[str, Any]:
             return _json_response(403, {"error": "admin only"})
         params = event.get("queryStringParameters") or {}
         before = params.get("before") or None
-        events, next_cursor = list_llm_calls(before, LLM_LOG_PAGE_LIMIT)
+        event_filter = params.get("event") or None
+        events, next_cursor = list_llm_calls(before, LLM_LOG_PAGE_LIMIT, event_filter)
         return _json_response(200, {"events": events, "next_cursor": next_cursor})
     if method == "GET" and path == "/api/metrics":
         params = event.get("queryStringParameters") or {}

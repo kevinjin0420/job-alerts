@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import html
+import random
 import re
 import time
 import urllib.error
@@ -114,7 +115,10 @@ def fetch_url(
     method = request.get_method()
     for attempt in range(MAX_FETCH_ATTEMPTS):
         if attempt > 0:
-            time.sleep(RETRY_BACKOFF_BASE_SECONDS * attempt)
+            # Jittered: resolve_listing_descriptions fires many requests to the same host
+            # concurrently (e.g. every Workday tenant's per-job description fetch), so an
+            # unjittered backoff has every worker retry in lockstep and collide again.
+            time.sleep(RETRY_BACKOFF_BASE_SECONDS * attempt * random.uniform(0.5, 1.5))
         started = time.monotonic()
         try:
             with urllib.request.urlopen(request, timeout=timeout) as response:

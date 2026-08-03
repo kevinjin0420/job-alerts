@@ -24,6 +24,17 @@ function verdictOf(event: LlmLogEvent): string {
   return event.is_job_posting ? "valid posting" : "rejected";
 }
 
+/** watch/validator.py and watch/classifier.py both render a missing description as this literal string. */
+function isMissingDescription(event: LlmLogEvent): boolean {
+  return event.user_content.includes("Description: not available");
+}
+
+const EVENT_FILTERS: { label: string; value: string | null }[] = [
+  { label: "All", value: null },
+  { label: "Classifier", value: "classifier_call" },
+  { label: "Validator", value: "validity_check" },
+];
+
 function LlmLogRow({ event }: { event: LlmLogEvent }) {
   const [isOpen, setIsOpen] = useState(false);
 
@@ -39,6 +50,11 @@ function LlmLogRow({ event }: { event: LlmLogEvent }) {
           <span className="shrink-0 px-1.5 py-0.5 border border-neutral-300 dark:border-neutral-700 text-neutral-600 dark:text-neutral-400">
             {event.event}
           </span>
+          {event.event === "validity_check" && isMissingDescription(event) && (
+            <span className="shrink-0 px-1.5 py-0.5 border border-amber-400 dark:border-amber-600 text-amber-700 dark:text-amber-400">
+              no JD
+            </span>
+          )}
           <span className="truncate text-neutral-700 dark:text-neutral-300">{previewOf(event.user_content)}</span>
         </span>
         <span className="flex items-center gap-3 shrink-0 text-neutral-500 dark:text-neutral-500">
@@ -89,7 +105,8 @@ function LoadingSkeleton() {
 }
 
 export function LlmLogsPage() {
-  const llmLogs = useLlmLogs();
+  const [eventFilter, setEventFilter] = useState<string | null>(null);
+  const llmLogs = useLlmLogs(eventFilter);
 
   const renderBody = () => {
     if (llmLogs.isPending) {
@@ -126,6 +143,23 @@ export function LlmLogsPage() {
       <PageHeader title="LLM Logs">
         <RefreshButton onClick={() => void llmLogs.refetch()} />
       </PageHeader>
+
+      <div className="flex items-center gap-2 mb-2">
+        {EVENT_FILTERS.map((filter) => (
+          <button
+            key={filter.label}
+            type="button"
+            onClick={() => setEventFilter(filter.value)}
+            className={`text-xs px-2 py-1 border ${
+              eventFilter === filter.value
+                ? "border-neutral-500 dark:border-neutral-400 bg-neutral-200 dark:bg-neutral-700"
+                : "border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-900"
+            }`}
+          >
+            {filter.label}
+          </button>
+        ))}
+      </div>
 
       <div className="flex-1 min-h-0 border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3 overflow-y-auto">
         {renderBody()}

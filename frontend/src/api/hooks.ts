@@ -42,7 +42,7 @@ export const queryKeys = {
   logs: (lambdaKey: string) => ["logs", lambdaKey] as const,
   logRuns: (lambdaKey: string) => ["logs", "runs", lambdaKey] as const,
   logSearch: (query: string, lambdaKey: string) => ["logs", "search", lambdaKey, query] as const,
-  llmLogs: ["llm-logs"] as const,
+  llmLogs: (eventFilter: string | null) => ["llm-logs", eventFilter] as const,
   adminUsers: ["admin", "users"] as const,
   adminSettings: ["admin", "settings"] as const,
   adminCompanies: ["admin", "companies"] as const,
@@ -150,11 +150,16 @@ export function useLogSearch(query: string, lambdaKey: string): UseInfiniteQuery
   });
 }
 
-export function useLlmLogs(): UseInfiniteQueryResult<InfiniteData<LlmLogPage>, Error> {
+export function useLlmLogs(eventFilter: string | null): UseInfiniteQueryResult<InfiniteData<LlmLogPage>, Error> {
   return useInfiniteQuery({
-    queryKey: queryKeys.llmLogs,
-    queryFn: ({ pageParam }) =>
-      apiRequest<LlmLogPage>(`/api/llm-logs${pageParam !== null ? `?before=${encodeURIComponent(pageParam)}` : ""}`),
+    queryKey: queryKeys.llmLogs(eventFilter),
+    queryFn: ({ pageParam }) => {
+      const params = new URLSearchParams();
+      if (pageParam !== null) params.set("before", pageParam);
+      if (eventFilter !== null) params.set("event", eventFilter);
+      const query = params.toString();
+      return apiRequest<LlmLogPage>(`/api/llm-logs${query ? `?${query}` : ""}`);
+    },
     initialPageParam: null as string | null,
     getNextPageParam: (lastPage) => lastPage.next_cursor,
   });

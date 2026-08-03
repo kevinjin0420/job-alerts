@@ -22,6 +22,8 @@ from sources.amazon import AmazonJobsSource
 from sources.ashby import EMPLOYMENT_TYPE_BY_JOB_TYPE, AshbySource
 from sources.oracle import OracleSource
 from sources.render import RenderSource, fetch_render_description
+from sources.bytedance_platform import RECRUITMENT_IDS_BY_JOB_TYPE as BYTEDANCE_PLATFORM_JOB_TYPES
+from sources.bytedance_platform import bytedance_platform_source
 from sources.sitemap import SitemapSource
 from sources.workday import WorkdaySource, fetch_workday_description
 from sources.zyte import ZyteSource, fetch_zyte_description
@@ -220,6 +222,10 @@ def build_job_type_sources(
             url = entry.get("intern_url")
             if url:
                 sources.append(SitemapSource(str(entry["company_name"]), str(url)))
+        elif kind == "bytedance" and job_type in BYTEDANCE_PLATFORM_JOB_TYPES:
+            source = bytedance_platform_source(str(entry["company_name"]), job_type)
+            if source:
+                sources.append(source)
     return sources
 
 
@@ -367,8 +373,11 @@ def resolve_listing_descriptions(all_listings: list[Listing]) -> list[Listing]:
             for future in concurrent.futures.as_completed(futures):
                 listing = futures[future]
                 description = future.result() or ""
-                save_listing_description(listing.unique_id, description)
+                # Only cache real successes - a fetch failure (429, timeout, transient
+                # renderer contention) is not proof the listing has no description, and
+                # caching "" forever would black-hole it even after the source recovers.
                 if description:
+                    save_listing_description(listing.unique_id, description)
                     fetched[listing.unique_id] = description
 
     if not fetched:
