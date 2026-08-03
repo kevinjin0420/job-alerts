@@ -178,6 +178,18 @@ class StripHtmlTests(unittest.TestCase):
         html = '<script>window.dataLayer = window.dataLayer || [];</script><p>Great role.</p>'
         self.assertEqual(strip_html(html), "Great role.")
 
+    def test_hidden_display_none_element_contents_are_removed(self) -> None:
+        # Regression: Microsoft embeds a JSON config blob in a hidden <code>, not <script>.
+        html = (
+            '<code id="branding-data" style="display: none;">{"themeOptions": {"a": "b>c"}}</code>'
+            "<p>Great role.</p>"
+        )
+        self.assertEqual(strip_html(html), "Great role.")
+
+    def test_hidden_element_with_other_attributes_before_style(self) -> None:
+        html = '<div data-x="1" style=\'display:none\'>junk</div><p>Great role.</p>'
+        self.assertEqual(strip_html(html), "Great role.")
+
 
 class ParseRenderedHtmlListingsTests(unittest.TestCase):
     def test_parses_card_style_listings_and_dedupes(self) -> None:

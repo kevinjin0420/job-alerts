@@ -19,6 +19,11 @@ _TAG_PATTERN = re.compile(r"<[^>]+>")
 # text) aren't inside another tag, so they'd survive as visible "text" - a full rendered page's
 # <head> is full of both, unlike the small description snippets Amazon/Oracle/Greenhouse return.
 _SCRIPT_OR_STYLE_BLOCK_PATTERN = re.compile(r"<(script|style)\b[^>]*>.*?</\1>", re.IGNORECASE | re.DOTALL)
+# Same issue as script/style, but for any tag hidden via inline display:none (e.g. Microsoft embeds a huge JSON config in a hidden <code>, not a <script>).
+_HIDDEN_ELEMENT_PATTERN = re.compile(
+    r"<([a-zA-Z][\w-]*)\b[^>]*style\s*=\s*(['\"])(?:(?!\2).)*display\s*:\s*none(?:(?!\2).)*\2[^>]*>.*?</\1>",
+    re.IGNORECASE | re.DOTALL,
+)
 _MIN_TITLE_LENGTH = 4
 
 
@@ -47,10 +52,10 @@ class Listing:
 
 def strip_html(text: str) -> str:
     """Collapses tags/entities down to plain text - shared by anchor-title extraction
-    and any description scraped as raw HTML (Greenhouse/Oracle/Amazon/Workday/zyte/render).
-    script/style block contents must go first, or their raw JS/CSS survives as "text"."""
+    and any description scraped as raw HTML (Greenhouse/Oracle/Amazon/Workday/zyte/render)."""
     without_script_or_style = _SCRIPT_OR_STYLE_BLOCK_PATTERN.sub(" ", text)
-    return " ".join(html.unescape(_TAG_PATTERN.sub(" ", without_script_or_style)).split())
+    without_hidden = _HIDDEN_ELEMENT_PATTERN.sub(" ", without_script_or_style)
+    return " ".join(html.unescape(_TAG_PATTERN.sub(" ", without_hidden)).split())
 
 
 # zyte/render have no structured description field to pull from, unlike a JSON API - the
