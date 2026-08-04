@@ -47,22 +47,29 @@ class BuildJobTypeSourcesZyteCooldownTests(unittest.TestCase):
         }
         self.pairs = {("Meta", "intern")}
 
-    def test_cooldown_enforced_by_default_excludes_recently_succeeded_source(self) -> None:
-        with patch("watch.get_source_last_success", return_value=time.time()):
+    def test_cooldown_enforced_by_default_excludes_recently_attempted_source(self) -> None:
+        with patch("watch.get_source_last_attempt", return_value=time.time()):
             sources = build_job_type_sources(self.pairs, self.catalog)
         self.assertEqual(sources, [])
 
     def test_cooldown_disabled_includes_source_regardless_of_recency(self) -> None:
-        with patch("watch.get_source_last_success", return_value=time.time()) as mock_get:
+        with patch("watch.get_source_last_attempt", return_value=time.time()) as mock_get:
             sources = build_job_type_sources(self.pairs, self.catalog, enforce_fetch_cooldown=False)
         mock_get.assert_not_called()
         self.assertEqual(len(sources), 1)
         self.assertEqual(sources[0].name, "zyte:Meta:intern")
 
-    def test_cooldown_enforced_still_includes_source_when_never_succeeded(self) -> None:
-        with patch("watch.get_source_last_success", return_value=None):
+    def test_cooldown_enforced_still_includes_source_when_never_attempted(self) -> None:
+        with patch("watch.get_source_last_attempt", return_value=None):
             sources = build_job_type_sources(self.pairs, self.catalog)
         self.assertEqual(len(sources), 1)
+
+    def test_cooldown_enforced_excludes_source_that_recently_failed(self) -> None:
+        # The bug this guards against: a persistently-failing zyte/render source with no
+        # cooldown gets retried every watch cycle forever, paying for a real call each time.
+        with patch("watch.get_source_last_attempt", return_value=time.time()):
+            sources = build_job_type_sources(self.pairs, self.catalog)
+        self.assertEqual(sources, [])
 
 
 class JobTypeUrlFallbackTests(unittest.TestCase):

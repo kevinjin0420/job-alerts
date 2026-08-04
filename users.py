@@ -409,10 +409,16 @@ def record_source_failure(source_name: str) -> int:
     return int(response["Attributes"]["consecutive_failures"]["N"])
 
 
-def get_source_last_success(source_name: str) -> int | None:
+def get_source_last_attempt(source_name: str) -> int | None:
+    """Most recent success OR failure - a failing source must cool down too, or a persistent
+    outage (e.g. the target site blocking us) gets retried every watch cycle forever, paying
+    for a real Zyte/render call each time for no benefit."""
     response = _dynamodb.get_item(TableName=SOURCE_HEALTH_TABLE, Key={"source_name": {"S": source_name}})
     item = response.get("Item")
-    return int(item["last_success_at"]["N"]) if item and "last_success_at" in item else None
+    if not item:
+        return None
+    timestamps = [int(item[key]["N"]) for key in ("last_success_at", "last_failure_at") if key in item]
+    return max(timestamps) if timestamps else None
 
 
 def is_source_alerted(source_name: str) -> bool:

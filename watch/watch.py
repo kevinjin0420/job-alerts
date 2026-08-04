@@ -31,7 +31,7 @@ from users import (
     get_listing_description,
     get_listing_validity,
     get_llm_model,
-    get_source_last_success,
+    get_source_last_attempt,
     is_source_alerted,
     list_active_users,
     list_all_users,
@@ -204,8 +204,8 @@ def build_job_type_sources(
             if not enforce_fetch_cooldown:
                 sources.append(source)
             else:
-                last_success = get_source_last_success(source.name)
-                if last_success is None or time.time() - last_success >= RENDERED_PAGE_FETCH_INTERVAL_SECONDS:
+                last_attempt = get_source_last_attempt(source.name)
+                if last_attempt is None or time.time() - last_attempt >= RENDERED_PAGE_FETCH_INTERVAL_SECONDS:
                     sources.append(source)
         elif kind == "workday":
             # board_token is "host:tenant:site" (e.g. "wd5:nvidia:NVIDIAExternalCareerSite").
