@@ -56,6 +56,22 @@ class ByteDancePlatformJobsSourceFetchTests(unittest.TestCase):
 
         self.assertIsNone(listings[0].description)
 
+    def test_requirement_merged_into_description(self) -> None:
+        source = self._source()
+        post = _post(description="Build things.", requirement="Available Summer of 2027.")
+        with patch("sources.bytedance_platform.fetch_url", return_value=_mock_response(1, [post])):
+            listings = source.fetch()
+
+        self.assertEqual(listings[0].description, "Build things.\n\nAvailable Summer of 2027.")
+
+    def test_missing_description_falls_back_to_requirement_only(self) -> None:
+        source = self._source()
+        post = _post(description="", requirement="Available Summer of 2027.")
+        with patch("sources.bytedance_platform.fetch_url", return_value=_mock_response(1, [post])):
+            listings = source.fetch()
+
+        self.assertEqual(listings[0].description, "Available Summer of 2027.")
+
     def test_missing_city_info_yields_no_locations(self) -> None:
         source = self._source()
         with patch("sources.bytedance_platform.fetch_url", return_value=_mock_response(1, [_post(city_info=None)])):

@@ -99,7 +99,11 @@ class ByteDancePlatformJobsSource:
         while country.get("parent"):
             country = country["parent"]
         locations = [str(name) for name in (city.get("en_name"), country.get("en_name")) if name]
-        description = str(post.get("description") or "").strip()
+        # requirement carries qualifications/eligibility (e.g. "Summer of 2027" start dates)
+        # that description doesn't restate - dropping it starved the classifier of the
+        # clearest season signal on the posting, leaving only a title suffix to go on.
+        description_parts = [str(post.get(field) or "").strip() for field in ("description", "requirement")]
+        description = "\n\n".join(part for part in description_parts if part)
         return Listing(
             source=self.name,
             id=post_id,
