@@ -103,6 +103,10 @@ class ByteDancePlatformJobsSource:
         # that description doesn't restate - dropping it starved the classifier of the
         # clearest season signal on the posting, leaving only a title suffix to go on.
         description_parts = [str(post.get(field) or "").strip() for field in ("description", "requirement")]
+        # job_subject ("Undergraduate/Master Intern - 2027 Start") is the only field that always carries the intake year; many titles omit it, leaving the classifier to guess the season.
+        subject = str((post.get("job_subject") or {}).get("en_name") or "").strip()
+        if subject:
+            description_parts.insert(0, f"Program: {subject}")
         description = "\n\n".join(part for part in description_parts if part)
         return Listing(
             source=self.name,

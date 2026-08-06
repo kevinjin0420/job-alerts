@@ -72,6 +72,37 @@ class ByteDancePlatformJobsSourceFetchTests(unittest.TestCase):
 
         self.assertEqual(listings[0].description, "Available Summer of 2027.")
 
+    def test_job_subject_leads_description_with_intake_year(self) -> None:
+        source = self._source()
+        post = _post(
+            description="Build things.",
+            requirement="Strong CS fundamentals.",
+            job_subject={"en_name": "Undergraduate/Master Intern - 2027 Start"},
+        )
+        with patch("sources.bytedance_platform.fetch_url", return_value=_mock_response(1, [post])):
+            listings = source.fetch()
+
+        self.assertEqual(
+            listings[0].description,
+            "Program: Undergraduate/Master Intern - 2027 Start\n\nBuild things.\n\nStrong CS fundamentals.",
+        )
+
+    def test_missing_job_subject_leaves_description_unchanged(self) -> None:
+        source = self._source()
+        post = _post(description="Build things.", job_subject=None)
+        with patch("sources.bytedance_platform.fetch_url", return_value=_mock_response(1, [post])):
+            listings = source.fetch()
+
+        self.assertEqual(listings[0].description, "Build things.")
+
+    def test_job_subject_alone_still_reaches_the_classifier(self) -> None:
+        source = self._source()
+        post = _post(description="", job_subject={"en_name": "PhD Intern - 2027 Start"})
+        with patch("sources.bytedance_platform.fetch_url", return_value=_mock_response(1, [post])):
+            listings = source.fetch()
+
+        self.assertEqual(listings[0].description, "Program: PhD Intern - 2027 Start")
+
     def test_missing_city_info_yields_no_locations(self) -> None:
         source = self._source()
         with patch("sources.bytedance_platform.fetch_url", return_value=_mock_response(1, [_post(city_info=None)])):
