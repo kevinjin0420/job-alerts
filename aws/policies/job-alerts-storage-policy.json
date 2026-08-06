@@ -15,6 +15,7 @@
         "dynamodb:DescribeTable",
         "dynamodb:UpdateTable",
         "dynamodb:UpdateTimeToLive",
+        "dynamodb:DescribeTimeToLive",
         "dynamodb:PutItem",
         "dynamodb:GetItem",
         "dynamodb:UpdateItem",

@@ -4,6 +4,19 @@ import unittest
 from unittest.mock import patch
 
 import users
+from sources.base import Listing
+
+
+def _entry(listing_id: str) -> tuple[Listing, str, str, int | None]:
+    listing = Listing(
+        source="direct",
+        id=listing_id,
+        company_name="Example",
+        title=f"Intern {listing_id}",
+        locations=["Remote"],
+        url=f"https://example.com/{listing_id}",
+    )
+    return listing, "seeded", "", None
 
 
 def _seen_listing(listing_id: str, seen_at: int) -> dict[str, object]:
@@ -49,6 +62,52 @@ class ListSeenListingsSinceFilterTests(unittest.TestCase):
             result = users.list_seen_listings("test-user", since=150)
 
         self.assertEqual([item["listing_id"] for item in result], ["new"])
+
+
+class RecordListingsBatchingTests(unittest.TestCase):
+    """A new user's first run seeds every listing every source produced at once - one
+    put_item per listing ate the watch Lambda's timeout budget on sequential round trips."""
+
+    def test_writes_are_chunked_to_dynamodbs_per_batch_cap(self) -> None:
+        entries = [_entry(str(index)) for index in range(60)]
+        with patch.object(users._dynamodb, "batch_write_item", return_value={}) as mock_batch:
+            users.record_listings("test-user", entries)
+
+        batch_sizes = [len(call.kwargs["RequestItems"][users.SEEN_LISTINGS_TABLE]) for call in mock_batch.call_args_list]
+        self.assertEqual(batch_sizes, [25, 25, 10])
+
+    def test_unprocessed_items_are_retried_not_dropped(self) -> None:
+        entries = [_entry("1"), _entry("2")]
+        first_call_items: list[dict[str, object]] = []
+
+        def throttle_once(**kwargs: object) -> dict[str, object]:
+            request_items = kwargs["RequestItems"]
+            assert isinstance(request_items, dict)
+            batch = request_items[users.SEEN_LISTINGS_TABLE]
+            if not first_call_items:
+                first_call_items.extend(batch)
+                return {"UnprocessedItems": {users.SEEN_LISTINGS_TABLE: batch[:1]}}
+            return {}
+
+        with patch.object(users._dynamodb, "batch_write_item", side_effect=throttle_once) as mock_batch:
+            with patch.object(users.time, "sleep"):
+                users.record_listings("test-user", entries)
+
+        self.assertEqual(mock_batch.call_count, 2)
+        self.assertEqual(len(mock_batch.call_args_list[1].kwargs["RequestItems"][users.SEEN_LISTINGS_TABLE]), 1)
+
+    def test_permanently_unprocessed_items_raise_rather_than_silently_vanish(self) -> None:
+        always_throttled = {"UnprocessedItems": {users.SEEN_LISTINGS_TABLE: [{"PutRequest": {"Item": {}}}]}}
+        with patch.object(users._dynamodb, "batch_write_item", return_value=always_throttled):
+            with patch.object(users.time, "sleep"):
+                with self.assertRaises(RuntimeError):
+                    users.record_listings("test-user", [_entry("1")])
+
+    def test_no_entries_issues_no_writes(self) -> None:
+        with patch.object(users._dynamodb, "batch_write_item") as mock_batch:
+            users.record_listings("test-user", [])
+
+        mock_batch.assert_not_called()
 
 
 if __name__ == "__main__":

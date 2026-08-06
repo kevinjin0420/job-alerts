@@ -7,6 +7,7 @@ import sys
 import threading
 import time
 import unittest
+import urllib.error
 from unittest.mock import patch
 
 from llm import LLMCallError
@@ -18,6 +19,7 @@ from watch import (
     CLASSIFIER_HEALTH_KEY,
     LAMBDA_HEALTH_FUNCTION_NAMES,
     LLM_CALL_CONCURRENCY,
+    SOURCE_EMPTY_ALERT_THRESHOLD,
     SOURCE_FAILURE_ALERT_THRESHOLD,
     _ashby_job_type_tag,
     _job_type_url,
@@ -238,7 +240,7 @@ class PassesClassifierFailureModeTests(unittest.TestCase):
             with patch("watch.record_source_success") as mock_success:
                 result = passes_classifier("fake-key", "fake-model", "must be remote", _listing("1"))
         self.assertEqual(result, expected)
-        mock_success.assert_called_once_with(CLASSIFIER_HEALTH_KEY)
+        mock_success.assert_called_once_with(CLASSIFIER_HEALTH_KEY, listing_count=1)
 
 
 class ClassifierFailureAlertingTests(unittest.TestCase):
@@ -351,7 +353,7 @@ class FetchAllListingsConcurrencyTests(unittest.TestCase):
             _FakeSource("a", [_listing("1")]),
             _FakeSource("b", [_listing("2"), _listing("3")]),
         ]
-        with patch("watch.record_source_success"):
+        with patch("watch.record_source_success", return_value=0):
             listings, unhealthy, sources_failed = fetch_all_listings(sources)
 
         self.assertEqual(len(listings), 3)
@@ -360,7 +362,7 @@ class FetchAllListingsConcurrencyTests(unittest.TestCase):
 
     def test_emits_source_fetch_event_per_source(self) -> None:
         sources = [_FakeSource("renderer:Roblox:intern", [_listing("1")])]
-        with patch("watch.record_source_success"):
+        with patch("watch.record_source_success", return_value=0):
             with patch("builtins.print") as mock_print:
                 fetch_all_listings(sources)
 
@@ -382,7 +384,7 @@ class FetchAllListingsConcurrencyTests(unittest.TestCase):
 
     def test_one_source_failing_does_not_block_others(self) -> None:
         sources = [_FakeSource("good", [_listing("1")]), _FakeSource("bad", error=RuntimeError("boom"))]
-        with patch("watch.record_source_success"):
+        with patch("watch.record_source_success", return_value=0):
             with patch("watch.record_source_failure", return_value=1):
                 with patch("watch.is_source_alerted", return_value=False):
                     listings, unhealthy, _ = fetch_all_listings(sources)
@@ -409,6 +411,111 @@ class FetchAllListingsConcurrencyTests(unittest.TestCase):
 
         self.assertEqual(unhealthy, [])
         mock_mark.assert_not_called()
+
+
+class EmptySourceAlertingTests(unittest.TestCase):
+    """A scraper whose selector broke returns [] without raising - it used to record a
+    plain success and read as permanently green. Empties now latch their own alert."""
+
+    def test_source_empty_past_threshold_is_reported_once(self) -> None:
+        sources = [_FakeSource("zyte:Meta:intern", [])]
+        with patch("watch.record_source_success", return_value=SOURCE_EMPTY_ALERT_THRESHOLD):
+            with patch("watch.is_source_alerted", return_value=False):
+                with patch("watch.mark_source_alerted") as mock_mark:
+                    _, unhealthy, sources_failed = fetch_all_listings(sources)
+
+        self.assertEqual(unhealthy, ["zyte:Meta:intern"])
+        mock_mark.assert_called_once_with("zyte:Meta:intern")
+        # An empty fetch is still a successful fetch - it must not inflate the failure count.
+        self.assertEqual(sources_failed, 0)
+
+    def test_empty_below_threshold_does_not_alert(self) -> None:
+        sources = [_FakeSource("zyte:Meta:intern", [])]
+        with patch("watch.record_source_success", return_value=SOURCE_EMPTY_ALERT_THRESHOLD - 1):
+            with patch("watch.is_source_alerted", return_value=False):
+                with patch("watch.mark_source_alerted") as mock_mark:
+                    _, unhealthy, _ = fetch_all_listings(sources)
+
+        self.assertEqual(unhealthy, [])
+        mock_mark.assert_not_called()
+
+    def test_already_alerted_empty_source_is_not_reported_again(self) -> None:
+        sources = [_FakeSource("zyte:Meta:intern", [])]
+        with patch("watch.record_source_success", return_value=SOURCE_EMPTY_ALERT_THRESHOLD):
+            with patch("watch.is_source_alerted", return_value=True):
+                with patch("watch.mark_source_alerted") as mock_mark:
+                    _, unhealthy, _ = fetch_all_listings(sources)
+
+        self.assertEqual(unhealthy, [])
+        mock_mark.assert_not_called()
+
+    def test_listing_count_is_passed_through_to_source_health(self) -> None:
+        sources = [_FakeSource("greenhouse:Example:intern", [_listing("1"), _listing("2")])]
+        with patch("watch.record_source_success", return_value=0) as mock_success:
+            fetch_all_listings(sources)
+
+        mock_success.assert_called_once_with("greenhouse:Example:intern", listing_count=2)
+
+
+class ProcessUserNotificationBatchingTests(unittest.TestCase):
+    """One company publishing a batch of matching roles in the same run sends one
+    notification per company, not one per listing (GitHub issue #2)."""
+
+    def _run(self, listings: list[Listing], notify_side_effect: object = None) -> tuple[object, tuple[int, int, int, bool]]:
+        user = {"user_id": "u1", "ntfy_topic": "topic"}
+        config = {"email_to": ["a@b.com"]}
+        with (
+            patch("watch.build_sources", return_value=[_FakeSource("direct")]),
+            patch("watch.build_job_type_sources", return_value=[]),
+            patch("watch.load_seen_ids", return_value={"already-seen"}),
+            patch("watch.record_listings") as mock_record,
+            patch("watch._resolve_resume_text", return_value=None),
+            patch("watch.passes_classifier", return_value=ClassificationResult(fits=True, reason="ok")),
+            patch("watch.notify", side_effect=notify_side_effect) as mock_notify,
+        ):
+            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as classifier_executor:
+                result = process_user(user, config, listings, {}, "u", "p", "key", "model", {}, classifier_executor)
+        return (mock_notify, mock_record), result
+
+    def test_one_notification_per_company_not_per_listing(self) -> None:
+        listings = [
+            _listing("1", company="Meta"),
+            _listing("2", company="Meta"),
+            _listing("3", company="Meta"),
+            _listing("4", company="Stripe"),
+        ]
+        (mock_notify, _), (_, notified_count, _, _) = self._run(listings)
+
+        self.assertEqual(mock_notify.call_count, 2)
+        companies = {call.args[4][0].company_name: len(call.args[4]) for call in mock_notify.call_args_list}
+        self.assertEqual(companies, {"Meta": 3, "Stripe": 1})
+        self.assertEqual(notified_count, 4)
+
+    def test_failed_notification_records_none_of_its_group(self) -> None:
+        listings = [_listing("1", company="Meta"), _listing("2", company="Meta")]
+        (_, mock_record), (_, notified_count, _, had_failure) = self._run(
+            listings, notify_side_effect=urllib.error.URLError("ntfy and smtp both down")
+        )
+
+        self.assertTrue(had_failure)
+        self.assertEqual(notified_count, 0)
+        mock_record.assert_not_called()
+
+    def test_one_company_failing_does_not_block_another(self) -> None:
+        listings = [_listing("1", company="Meta"), _listing("2", company="Stripe")]
+
+        def fail_meta_only(*args: object) -> None:
+            batch = args[4]
+            assert isinstance(batch, list)
+            if batch[0].company_name == "Meta":
+                raise urllib.error.URLError("down")
+
+        (_, mock_record), (_, notified_count, _, had_failure) = self._run(listings, notify_side_effect=fail_meta_only)
+
+        self.assertTrue(had_failure)
+        self.assertEqual(notified_count, 1)
+        recorded = [entry[0].company_name for call in mock_record.call_args_list for entry in call.args[1]]
+        self.assertEqual(recorded, ["Stripe"])
 
 
 class ProcessUserSharedClassifierExecutorTests(unittest.TestCase):

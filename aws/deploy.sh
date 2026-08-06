@@ -10,6 +10,12 @@ ROLE_NAME="job-alerts-lambda-role"
 RULE_NAME="job-alerts-watch-schedule"
 RUNTIME="python3.12"
 HANDLER="watch.handler"
+ALARM_TOPIC_NAME="job-alerts-alarms"
+# Every in-app alert is emitted BY the watch Lambda, so a watch Lambda that stopped running fails silently; these alarms live outside the app for that reason, and SNS is the only notification action CloudWatch alarms have.
+ALARM_INVOCATION_WINDOW_SECONDS=3600
+ALARM_ERROR_WINDOW_SECONDS=900
+# Below the 280s timeout, so a run creeping toward the ceiling is visible before it starts getting cut off.
+ALARM_DURATION_THRESHOLD_MS=240000
 
 AWS=(aws --profile "${PROFILE}" --region "${REGION}")
 
@@ -125,5 +131,46 @@ echo "==> Scheduling (${SCHEDULE_RATE}): ${RULE_NAME}"
   --action lambda:InvokeFunction --principal events.amazonaws.com \
   --source-arn "arn:aws:events:${REGION}:${ACCOUNT_ID}:rule/${RULE_NAME}" >/dev/null 2>&1 || true
 "${AWS[@]}" events put-targets --rule "${RULE_NAME}" --targets "Id=1,Arn=${FUNCTION_ARN}" >/dev/null
+
+echo "==> Ensuring alarm topic exists: ${ALARM_TOPIC_NAME}"
+TOPIC_ARN=$("${AWS[@]}" sns create-topic --name "${ALARM_TOPIC_NAME}" --query 'TopicArn' --output text)
+# Subscribers come from the same admin roster _notify_all_admins uses, so there is one
+# admin list, not a second one in config. user_id is the admin's email address.
+# ponytail: adds only. A demoted admin keeps getting alarm mail until unsubscribed by hand; add a prune pass here if that stops being rare.
+ADMIN_EMAILS=$("${AWS[@]}" dynamodb scan --table-name job-alerts-users \
+  --filter-expression "is_admin = :true" --expression-attribute-values '{":true":{"BOOL":true}}' \
+  --projection-expression "user_id" --query 'Items[].user_id.S' --output text 2>/dev/null || true)
+if [ -z "${ADMIN_EMAILS}" ]; then
+  echo "    No admins found in job-alerts-users - alarms will fire into an empty topic." >&2
+fi
+# --output text separates with tabs; normalized to spaces so the membership test below matches.
+SUBSCRIBED=$("${AWS[@]}" sns list-subscriptions-by-topic --topic-arn "${TOPIC_ARN}" --query 'Subscriptions[].Endpoint' --output text | tr '\t\n' '  ')
+for admin_email in ${ADMIN_EMAILS}; do
+  case " ${SUBSCRIBED} " in
+    *" ${admin_email} "*) continue ;;
+  esac
+  "${AWS[@]}" sns subscribe --topic-arn "${TOPIC_ARN}" --protocol email --notification-endpoint "${admin_email}" >/dev/null
+  echo "    Subscribed ${admin_email} - they must confirm by email or alarms stay silent for them."
+done
+
+put_watch_alarm() {
+  "${AWS[@]}" cloudwatch put-metric-alarm \
+    --alarm-name "$1" --alarm-description "$2" --namespace AWS/Lambda --metric-name "$3" \
+    --dimensions "Name=FunctionName,Value=${FUNCTION_NAME}" \
+    --period "$4" --evaluation-periods 1 --threshold "$5" --comparison-operator "$6" \
+    --treat-missing-data "$7" --alarm-actions "${TOPIC_ARN}" --ok-actions "${TOPIC_ARN}" "${@:8}"
+}
+
+echo "==> Ensuring CloudWatch alarms on ${FUNCTION_NAME}"
+# missing -> breaching is the point: no Invocations datapoint at all (schedule deleted, function gone, account throttle) is exactly what this catches.
+put_watch_alarm "job-alerts-watch-not-running" \
+  "watch Lambda has not been invoked in the last hour" \
+  Invocations "${ALARM_INVOCATION_WINDOW_SECONDS}" 1 LessThanThreshold breaching --statistic Sum
+put_watch_alarm "job-alerts-watch-errors" \
+  "watch Lambda raised an unhandled error" \
+  Errors "${ALARM_ERROR_WINDOW_SECONDS}" 0 GreaterThanThreshold notBreaching --statistic Sum
+put_watch_alarm "job-alerts-watch-slow" \
+  "watch Lambda p99 duration approaching its 280s timeout" \
+  Duration "${ALARM_ERROR_WINDOW_SECONDS}" "${ALARM_DURATION_THRESHOLD_MS}" GreaterThanThreshold notBreaching --extended-statistic p99
 
 echo "==> Done. Function: ${FUNCTION_ARN}"

@@ -50,6 +50,8 @@ from validator import check_is_job_posting
 
 DEFAULT_JOB_TYPES = ["intern"]
 SOURCE_FAILURE_ALERT_THRESHOLD = 3
+# Far higher than the failure threshold because an empty fetch is usually just an off-season board; only a long run of them from a source that has produced listings before looks like a broken selector.
+SOURCE_EMPTY_ALERT_THRESHOLD = 12
 CLASSIFIER_HEALTH_KEY = "classifier:openrouter"
 # Same source-health table/threshold used for scraper sources and the classifier -
 # a Lambda "failing" here means it logged Errors in its own recent CloudWatch metrics,
@@ -267,7 +269,7 @@ def passes_classifier(
             mark_source_alerted(CLASSIFIER_HEALTH_KEY)
             alert_admins_classifier_failing(str(error), smtp_user, smtp_pass)
         return None
-    record_source_success(CLASSIFIER_HEALTH_KEY)
+    record_source_success(CLASSIFIER_HEALTH_KEY, listing_count=1)
     return result
 
 
@@ -286,9 +288,9 @@ def _source_kind(source: Source) -> str:
 
 
 def fetch_all_listings(sources: list[Source]) -> tuple[list[Listing], list[str], int]:
-    """Returns (listings, source names that just crossed the failure-alert threshold,
-    sources_failed count). Fetches run concurrently; side effects happen back on this
-    thread as results arrive, not inside worker threads."""
+    """Returns (listings, source names that just crossed an alert threshold - failing or
+    persistently empty, sources_failed count). Fetches run concurrently; side effects
+    happen back on this thread as results arrive, not inside worker threads."""
     all_listings: list[Listing] = []
     newly_unhealthy: list[str] = []
     sources_failed = 0
@@ -306,12 +308,15 @@ def fetch_all_listings(sources: list[Source]) -> tuple[list[Listing], list[str],
                     newly_unhealthy.append(source.name)
                     mark_source_alerted(source.name)
                 continue
-            record_source_success(source.name)
+            consecutive_empty = record_source_success(source.name, listing_count=len(result))
             print(f"Source '{source.name}': {len(result)} matching listing(s)")
             print(json.dumps({
                 "event": "source_fetch", "source": source.name, "kind": _source_kind(source),
                 "success": True, "duration_ms": round(duration_ms), "listing_count": len(result),
             }))
+            if consecutive_empty >= SOURCE_EMPTY_ALERT_THRESHOLD and not is_source_alerted(source.name):
+                newly_unhealthy.append(source.name)
+                mark_source_alerted(source.name)
             all_listings.extend(result)
     return all_listings, newly_unhealthy, sources_failed
 
@@ -446,8 +451,9 @@ def _notify_all_admins(subject: str, body: str, smtp_user: str, smtp_pass: str) 
 
 def alert_admins(unhealthy_sources: list[str], smtp_user: str, smtp_pass: str) -> None:
     body = (
-        f"These sources have failed {SOURCE_FAILURE_ALERT_THRESHOLD}+ runs in a row: "
-        f"{', '.join(unhealthy_sources)}"
+        f"These sources are unhealthy - either failed {SOURCE_FAILURE_ALERT_THRESHOLD}+ runs in a row, "
+        f"or returned zero listings {SOURCE_EMPTY_ALERT_THRESHOLD}+ fetches in a row after previously "
+        f"returning some (likely a broken selector): {', '.join(unhealthy_sources)}"
     )
     _notify_all_admins("job-alerts: source failing", body, smtp_user, smtp_pass)
 
@@ -500,7 +506,8 @@ def check_lambda_health() -> list[str]:
                 newly_unhealthy.append(health_key)
                 mark_source_alerted(health_key)
         else:
-            record_source_success(health_key)
+            # A Lambda health key has no "empty" mode - a clean error check is a real recovery.
+            record_source_success(health_key, listing_count=1)
     return newly_unhealthy
 
 
@@ -603,6 +610,8 @@ def process_user(
             classifications[listing.unique_id] = future.result()
 
     # Model name goes in the log line only (below), not the stored/displayed reason - the Listings page shows the raw LLM reason text as-is.
+    # Collected rather than sent inline so the loop below can batch by company - one company routinely publishes several matching roles in the same run.
+    pending_by_company: dict[str, list[tuple[Listing, ClassificationResult]]] = {}
     for listing in new_listings:
         is_job_posting, invalid_reason = listing_validity.get(listing.unique_id, (True, ""))
         if not is_job_posting:
@@ -617,19 +626,24 @@ def process_user(
             dismissed_count += 1
             print(f"User {user_id}: classifier dismissed: {listing.company_name} - {listing.title} ({classification.reason}) [classifier: {llm_model}]")
             continue
+        pending_by_company.setdefault(listing.company_name, []).append((listing, classification))
+
+    for company_name, pending in pending_by_company.items():
+        listings = [listing for listing, _ in pending]
         try:
-            notify(ntfy_topic, smtp_user, smtp_pass, email_recipients, listing)
+            notify(ntfy_topic, smtp_user, smtp_pass, email_recipients, listings)
         except NotificationError as error:
             had_notification_failure = True
-            print(
-                f"User {user_id}: failed to notify for {listing.company_name} - {listing.title}: {error}",
-                file=sys.stderr,
-            )
-            # Not recorded - retried next run, since the notification itself never went out.
+            # Whole group left unrecorded - the alert covering all of them never went out, so all of them retry next run.
+            print(f"User {user_id}: failed to notify for {company_name} ({len(listings)} listing(s)): {error}", file=sys.stderr)
             continue
-        record_listings(user_id, [(listing, "notified", classification.reason, classification.fit_score)])
-        notified_count += 1
-        print(f"User {user_id}: notified: {listing.company_name} - {listing.title} [classifier: {llm_model}]")
+        record_listings(
+            user_id,
+            [(listing, "notified", classification.reason, classification.fit_score) for listing, classification in pending],
+        )
+        notified_count += len(listings)
+        titles = ", ".join(listing.title for listing in listings)
+        print(f"User {user_id}: notified: {company_name} - {titles} [classifier: {llm_model}]")
 
     return len(new_listings), notified_count, dismissed_count, had_notification_failure
 

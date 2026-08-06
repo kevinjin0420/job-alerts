@@ -22,7 +22,13 @@ LISTING_VALIDITY_TABLE = "job-alerts-listing-validity"
 LISTING_DESCRIPTION_TABLE = "job-alerts-listing-description"
 LLM_CALL_LOG_TABLE = "job-alerts-llm-call-log"
 LLM_CALL_LOG_TTL_SECONDS = 30 * 24 * 60 * 60
+# How long a "not a job posting" verdict sticks before it is re-checked (see save_listing_validity).
+LISTING_REJECTION_TTL_SECONDS = 30 * 24 * 60 * 60
 DEFAULT_LLM_MODEL = "openai/gpt-oss-120b"
+# DynamoDB's hard per-batch_write_item cap, not a tunable.
+BATCH_WRITE_MAX_ITEMS = 25
+BATCH_WRITE_MAX_ATTEMPTS = 5
+BATCH_WRITE_BACKOFF_BASE_SECONDS = 0.5
 
 _dynamodb = boto3.client("dynamodb")
 _deserializer = TypeDeserializer()
@@ -78,8 +84,13 @@ def load_seen_ids(user_id: str) -> set[str]:
 def record_listings(user_id: str, entries: list[tuple[Listing, str, str, int | None]]) -> None:
     """entries are (listing, status, reason, fit_score). status is 'notified',
     'dismissed', 'invalid' (scraped junk, not an actual job posting), or 'seeded'.
-    fit_score is None unless the user has a resume uploaded (see classifier.is_good_fit)."""
+    fit_score is None unless the user has a resume uploaded (see classifier.is_good_fit).
+
+    Batched, not one put_item per entry: a new user's first run seeds every listing every
+    source produced at once, and thousands of sequential round trips eat the watch
+    Lambda's whole timeout budget."""
     now = int(time.time())
+    write_requests: list[dict[str, Any]] = []
     for listing, status, reason, fit_score in entries:
         item: dict[str, Any] = {
             "user_id": {"S": user_id},
@@ -94,7 +105,20 @@ def record_listings(user_id: str, entries: list[tuple[Listing, str, str, int | N
         }
         if fit_score is not None:
             item["fit_score"] = {"N": str(fit_score)}
-        _dynamodb.put_item(TableName=SEEN_LISTINGS_TABLE, Item=item)
+        write_requests.append({"PutRequest": {"Item": item}})
+
+    for start in range(0, len(write_requests), BATCH_WRITE_MAX_ITEMS):
+        pending = write_requests[start : start + BATCH_WRITE_MAX_ITEMS]
+        for attempt in range(BATCH_WRITE_MAX_ATTEMPTS):
+            if attempt > 0:
+                time.sleep(BATCH_WRITE_BACKOFF_BASE_SECONDS * attempt)
+            response = _dynamodb.batch_write_item(RequestItems={SEEN_LISTINGS_TABLE: pending})
+            # batch_write_item returns 200 while dropping throttled items into UnprocessedItems; not retrying them re-notifies the user next run.
+            pending = response.get("UnprocessedItems", {}).get(SEEN_LISTINGS_TABLE, [])
+            if not pending:
+                break
+        if pending:
+            raise RuntimeError(f"record_listings: {len(pending)} item(s) still unprocessed for user {user_id}")
 
 
 def list_seen_listings(user_id: str, limit: int = 300, since: float | None = None) -> list[dict[str, Any]]:
@@ -122,8 +146,15 @@ def list_seen_listings(user_id: str, limit: int = 300, since: float | None = Non
 
 
 def retry_listing(user_id: str, listing_id: str) -> None:
-    """Removes a listing from the seen set so the next run reclassifies it."""
+    """Removes a listing from the seen set so the next run reclassifies it.
+
+    Drops the cached validity verdict too, otherwise "retry" silently re-runs only the
+    classifier: a listing the validator wrongly rejected reads its cached "not a job
+    posting" again and is dropped before the classifier ever sees it. The verdict is
+    global rather than per-user, so this costs one shared re-check and fixes it for
+    everyone, which is what a user hitting retry on a real posting is asking for."""
     _dynamodb.delete_item(TableName=SEEN_LISTINGS_TABLE, Key={"user_id": {"S": user_id}, "listing_id": {"S": listing_id}})
+    _dynamodb.delete_item(TableName=LISTING_VALIDITY_TABLE, Key={"listing_id": {"S": listing_id}})
 
 
 def get_listing_validity(listing_id: str) -> dict[str, Any] | None:
@@ -136,17 +167,20 @@ def get_listing_validity(listing_id: str) -> dict[str, Any] | None:
 
 
 def save_listing_validity(listing_id: str, *, is_job_posting: bool, reason: str) -> None:
-    _dynamodb.put_item(
-        TableName=LISTING_VALIDITY_TABLE,
-        Item=_wrap_item(
-            {
-                "listing_id": listing_id,
-                "is_job_posting": is_job_posting,
-                "reason": reason,
-                "checked_at": int(time.time()),
-            }
-        ),
-    )
+    """Rejections expire, acceptances are kept forever. The two verdicts are not equally
+    costly to get wrong: a stray "not a job posting" black-holes a real listing for every
+    user permanently, while a stray "yes" only lets junk through to the classifier, which
+    rejects it anyway. Expiring just the rejections buys a self-heal for the damaging
+    direction without re-paying for an LLM call on every listing that was fine."""
+    item: dict[str, Any] = {
+        "listing_id": listing_id,
+        "is_job_posting": is_job_posting,
+        "reason": reason,
+        "checked_at": int(time.time()),
+    }
+    if not is_job_posting:
+        item["ttl"] = int(time.time()) + LISTING_REJECTION_TTL_SECONDS
+    _dynamodb.put_item(TableName=LISTING_VALIDITY_TABLE, Item=_wrap_item(item))
 
 
 def get_listing_description(listing_id: str) -> str | None:
@@ -377,20 +411,48 @@ def delete_company(name: str) -> None:
     _dynamodb.delete_item(TableName=COMPANIES_TABLE, Key={"company_name": {"S": name}})
 
 
-def record_source_success(source_name: str) -> None:
+def record_source_success(source_name: str, *, listing_count: int) -> int:
+    """Returns the new consecutive-empty count, or 0 when this source has never yet
+    produced a listing (a genuinely empty board, not a regression to alert on).
+
+    A fetch that succeeds but returns nothing is not proof of health - a scraper whose
+    selector broke returns [] on every run and would otherwise read as permanently green.
+    Empties are counted separately from failures, and only a non-empty fetch clears the
+    alerted latch, so "alerted until it actually recovers" holds for both modes.
+    """
+    now = str(int(time.time()))
     # update_item (not put_item) so last_failure_at/failure_count survive a
     # success instead of being silently dropped by a full-item overwrite.
-    _dynamodb.update_item(
+    if listing_count > 0:
+        _dynamodb.update_item(
+            TableName=SOURCE_HEALTH_TABLE,
+            Key={"source_name": {"S": source_name}},
+            UpdateExpression=(
+                "SET last_success_at = :now, last_nonzero_at = :now, consecutive_failures = :zero, "
+                "consecutive_empty = :zero, alerted = :false ADD success_count :one"
+            ),
+            ExpressionAttributeValues={
+                ":now": {"N": now},
+                ":zero": {"N": "0"},
+                ":false": {"BOOL": False},
+                ":one": {"N": "1"},
+            },
+        )
+        return 0
+    response = _dynamodb.update_item(
         TableName=SOURCE_HEALTH_TABLE,
         Key={"source_name": {"S": source_name}},
-        UpdateExpression="SET last_success_at = :now, consecutive_failures = :zero, alerted = :false ADD success_count :one",
-        ExpressionAttributeValues={
-            ":now": {"N": str(int(time.time()))},
-            ":zero": {"N": "0"},
-            ":false": {"BOOL": False},
-            ":one": {"N": "1"},
-        },
+        UpdateExpression=(
+            "SET last_success_at = :now, consecutive_failures = :zero, "
+            "consecutive_empty = if_not_exists(consecutive_empty, :zero) + :one ADD success_count :one"
+        ),
+        ExpressionAttributeValues={":now": {"N": now}, ":zero": {"N": "0"}, ":one": {"N": "1"}},
+        ReturnValues="ALL_NEW",
     )
+    attributes = response["Attributes"]
+    if "last_nonzero_at" not in attributes:
+        return 0
+    return int(attributes["consecutive_empty"]["N"])
 
 
 def record_source_failure(source_name: str) -> int:

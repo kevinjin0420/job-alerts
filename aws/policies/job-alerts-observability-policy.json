@@ -22,6 +22,24 @@
       "Effect": "Allow",
       "Action": ["cloudwatch:GetMetricData", "cloudwatch:GetMetricStatistics", "cloudwatch:ListMetrics"],
       "Resource": "*"
+    },
+    {
+      "Sid": "Alarms",
+      "Effect": "Allow",
+      "Action": ["cloudwatch:PutMetricAlarm", "cloudwatch:DeleteAlarms"],
+      "Resource": "arn:aws:cloudwatch:us-west-1:863516093571:alarm:job-alerts-*"
+    },
+    {
+      "Sid": "AlarmRead",
+      "Effect": "Allow",
+      "Action": "cloudwatch:DescribeAlarms",
+      "Resource": "*"
+    },
+    {
+      "Sid": "AlarmTopic",
+      "Effect": "Allow",
+      "Action": ["sns:CreateTopic", "sns:Subscribe", "sns:ListSubscriptionsByTopic", "sns:GetTopicAttributes"],
+      "Resource": "arn:aws:sns:us-west-1:863516093571:job-alerts-alarms"
     }
   ]
 }

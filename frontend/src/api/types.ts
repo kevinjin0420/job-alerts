@@ -212,9 +212,13 @@ export interface SourceHealth {
   source_name: string;
   last_success_at?: number;
   last_failure_at?: number;
+  // Absent until the source has produced at least one listing; a long consecutive_empty
+  // run past that point is a broken selector, not an off-season board.
+  last_nonzero_at?: number;
   success_count?: number;
   failure_count?: number;
   consecutive_failures?: number;
+  consecutive_empty?: number;
   alerted?: boolean;
 }
 
